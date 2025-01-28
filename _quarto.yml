@@ -1,0 +1,39 @@
+project:
+  type: website
+
+website:
+  title: "Porfolio"
+  navbar:
+    left:
+      - text: "R-Visual Analytics and Applications"
+        menu: 
+          - text: "Hands-on Exercise 1.1"
+      - text: "R-Geospatial Analytics and Applications"
+        menu: 
+          - text: "Project 01"
+            href: "R-GAA/Project01/Project01.html" 
+          - text: "Project 02"
+            href: "R-GAA/Project02/Project02.html" 
+          - text: "Project 03"
+            href: "R-GAA/Project03/Project03.html" 
+      - text: "Python"
+        menu: 
+          - text: "Project 1"               
+    right: 
+      - href: index.qmd
+        text: Home
+      - about.qmd
+
+format:
+  html:
+    theme: 
+      light: Zephyr
+      dark: darkly
+    css: styles.css
+    toc: true
+    toc-location: left
+    grid: 
+      body-width: 1500px
+      sidebar-width: 300px
+      margin-width:	150px
+

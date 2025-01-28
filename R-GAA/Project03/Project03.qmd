@@ -1,0 +1,954 @@
+---
+title: "Project 3"
+author: "Ha Duc Tien"
+date: "October 21, 2024"
+date-modified: "last-modified"
+execute: 
+  eval: true
+  echo: true
+  warning: false
+  freeze: true
+---
+
+# 1. Objectives and Tasks and packages used
+
+In this take-home exercise, I am required to calibrate a predictive model to predict HDB resale prices between July-September 2024 by using HDB resale transaction records in 2023. For the purpose of this take-home exercise, HDB Resale Flat Prices provided by Data.gov.sg should be used as the core data set. The study should focus on either three-room, four-room or five-room flat.
+
+https://isss626-ay2024-25aug.netlify.app/take-home_ex03b 
+
+The below packages are used and loaded in using the `p_load()` function of `pacman` package
+
+```{r}
+pacman::p_load(tidyverse, sf, httr, jsonlite, tmap, SpatialAcc, 
+               spdep, GWmodel, SpatialML, rsample, Metrics, kableExtra,
+               knitr, ggstatsplot, spatstat, see, performance)
+```
+
+# 2. The data
+
+Below is a list of predictors and data used in this study
+
+Structural factors all of this are locate within the [Resale flat prices based on registration date from Jan-2017 onwards](https://data.gov.sg/datasets/d_8b84c4ee58e3cfc0ece0d773c8ca6abc/view) under the *resale.csv* file
+-   Area of the unit
+-   Floor level
+-   Remaining lease
+
+Locational factors
+
+-   Proxomity to CBDs based on the [Master Plan 2014 Subzone Boundary (Web)](https://data.gov.sg/datasets/d_d14da225fccf921049ab64238ff473d9/view)
+-   Proximity to eldercares from Eldercare Services (SHP) [data.gov.sg](https://data.gov.sg/datasets/d_3545b068e3f3506c56b2cb6b6117b884/view)
+-   Proximity to market/food centres is based on NEA Market and Food Centre from [data.gov.sg](https://data.gov.sg/datasets/d_a57a245b3cf3ec76ad36d55393a16e97/view)
+-   Proximity to MRTs or MRTs exit points are based on LTA MRT Station Exit (GEOJSON) from [data.gov.sg](https://data.gov.sg/datasets/d_b39d3a0871985372d7e1637193335da5/view)
+-   Proximity to parks based on the Parks from NPARKS (National Parks Board) from [data.gov.sg](https://data.gov.sg/datasets/d_0542d48f0991541706b58059381a6eca/view)
+-   Proximity to shopping malls this is based on a list of shopping malls namaes extracted from [Wikipedia](https://en.wikipedia.org/wiki/List_of_shopping_malls_in_Singapore)
+-   Proximity to supermarkets based on the Supermarkets (KML) from SFA (Singapore Food Agency) from [data.gov.sg](https://data.gov.sg/datasets/d_8a77ee0446716b2ce475a587004afc73/view)
+-   Numbers of kindergartens within 350m from the Kindergartens data from ECDA (Early Childhood Development Agency) from [data.gov.sg](https://data.gov.sg/datasets/d_95aa63998d7de94dd4cb3e8e43a5f6d5/view)
+-   Numbers of childcare centres within 350m probabably based on the Child Care Services from [data.gov.sg](https://data.gov.sg/datasets/d_5d668e3f544335f8028f546827b773b4/view), but the actual data was from [Chapter 4](https://r4gdsa.netlify.app/chap04.html#the-data)
+-   Numbers of bus stops within 350m data is based on the Bus Stops data from LTA [datamall](https://datamall.lta.gov.sg/content/datamall/en/dynamic-data.html)
+-   Numbers of preschools within 350m based on Pre-Schools Location data from ECDA (Early Childhood Development Agency) from [data.gov.sg](https://data.gov.sg/datasets/d_61eefab99958fd70e6aab17320a71f1c/view)
+-   Numbers of CHAS within 1km based on the CHAS Clinics data from MOH (Ministry of Health) from [data.gov.sg](https://data.gov.sg/datasets/d_65d11d02ab0246cec53bfc995c782628/view)
+-   Numbers of primary schools within 1km The data of schools is gotten from the [data.gov.sg](https://data.gov.sg/datasets/d_688b934f82c1059ed0a6993d2a829089/view) website that has a list of all schools and their addresses
+
+
+# 3. Data prepratation and wrangling
+
+## 3.1 First phase of data preparation and wrangling
+
+### Resale data 
+
+First the resale data will be loaded into data call `resale` using the `read_cvs()`
+
+```{r}
+resale <- read_csv("data/non-geo/resale.csv") %>%
+  filter(month >= "2023-01" & month <= "2024-09")
+```
+
+```{r}
+head(resale)
+```
+First look at the data we could see that there is a range of story under `storey_range` and `remaining_lease` are actully a string instead of numeric data that need to be convert to a better data for better modelling later. Other data such as `floor_area_sqm` and `resale_price` seems to be in appropriate
+
+
+Quickly checking unique data for `storey_range`
+
+```{r}
+unique(resale$storey_range)
+```
+There is 17 unique data which I'll convert to numeric from 1-17 separately..
+
+The `remaining_lease` would go through being separate into `remaining_lease_yr` column and `remaining_lease_mth` separated then recalculate under `remaining_lease_time` with function `remaining_lease_yr`*12 + `remaining_lease_mth`.
+
+All of the above steps would be done with the code below creating `resale_tidy` data
+
+```{r}
+#| eval: false 
+resale_tidy <- resale %>%
+  mutate(address = paste(block,street_name)) %>%
+  mutate(remaining_lease_yr = as.integer(
+    str_sub(remaining_lease, 0, 2)))%>%
+  mutate(remaining_lease_mth = as.integer(
+    str_sub(remaining_lease, 9, 11))) %>%
+  mutate_if(is.numeric , replace_na, replace = 0) %>%
+  mutate(remaining_lease_time = remaining_lease_yr*12 + remaining_lease_mth) %>%
+  mutate(storey_level =  case_when(
+    storey_range == "01 TO 03" ~ as.integer(1),
+    storey_range == "04 TO 06" ~ as.integer(2),
+    storey_range == "07 TO 09" ~ as.integer(3),
+    storey_range == "10 TO 12" ~ as.integer(4),
+    storey_range == "13 TO 15" ~ as.integer(5),
+    storey_range == "16 TO 18" ~ as.integer(6),
+    storey_range == "19 TO 21" ~ as.integer(7),
+    storey_range == "22 TO 24" ~ as.integer(8),
+    storey_range == "25 TO 27" ~ as.integer(9),
+    storey_range == "28 TO 30" ~ as.integer(10),
+    storey_range == "31 TO 33" ~ as.integer(11),
+    storey_range == "34 TO 36" ~ as.integer(12),
+    storey_range == "37 TO 39" ~ as.integer(13),
+    storey_range == "40 TO 42" ~ as.integer(14),
+    storey_range == "43 TO 45" ~ as.integer(15),
+    storey_range == "46 TO 48" ~ as.integer(16),
+    storey_range == "49 TO 51" ~ as.integer(17)))
+  
+```
+
+Now with the basic resale data sort, we would next need to find the geographical location of each of these units, to do this I would first need to get the list of `address` of these units, using the code chunk below
+
+```{r}
+#| eval: false 
+add_list <- sort(unique(resale_tidy$address))
+```
+
+This function below is used to make and API call to [onemap](https://www.onemap.gov.sg) API to extract the coordinate of these units based on its address, this would later be used based on names of shopping malls as well which I will mention.
+
+```{r}
+get_coords <- function(add_list){
+  
+  # Create a data frame to store all retrieved coordinates
+  postal_coords <- data.frame()
+    
+  for (i in add_list){
+    #print(i)
+
+    r <- GET('https://www.onemap.gov.sg/api/common/elastic/search?',
+           query=list(searchVal=i,
+                     returnGeom='Y',
+                     getAddrDetails='Y'))
+    data <- fromJSON(rawToChar(r$content))
+    found <- data$found
+    res <- data$results
+    
+    # Create a new data frame for each address
+    new_row <- data.frame()
+    
+    # If single result, append 
+    if (found == 1){
+      postal <- res$POSTAL 
+      lat <- res$LATITUDE
+      lng <- res$LONGITUDE
+      new_row <- data.frame(address= i, 
+                            postal = postal, 
+                            latitude = lat, 
+                            longitude = lng)
+    }
+    
+    # If multiple results, drop NIL and append top 1
+    else if (found > 1){
+      # Remove those with NIL as postal
+      res_sub <- res[res$POSTAL != "NIL", ]
+      
+      # Set as NA first if no Postal
+      if (nrow(res_sub) == 0) {
+          new_row <- data.frame(address= i, 
+                                postal = NA, 
+                                latitude = NA, 
+                                longitude = NA)
+      }
+      
+      else{
+        top1 <- head(res_sub, n = 1)
+        postal <- top1$POSTAL 
+        lat <- top1$LATITUDE
+        lng <- top1$LONGITUDE
+        new_row <- data.frame(address= i, 
+                              postal = postal, 
+                              latitude = lat, 
+                              longitude = lng)
+      }
+    }
+
+    else {
+      new_row <- data.frame(address= i, 
+                            postal = NA, 
+                            latitude = NA, 
+                            longitude = NA)
+    }
+    
+    # Add the row
+    postal_coords <- rbind(postal_coords, new_row)
+  }
+  return(postal_coords)
+}
+```
+
+Once the function is loaded and the unit address list is created, the below code chunk is run to get all the geo coordinates of these units
+
+```{r}
+#| eval: false  
+coords <- get_coords(add_list)
+```
+
+Just in case I will write these coords to a rds file for later usage. 
+
+```{r}
+#| eval: false 
+write_rds(coords, "data/rds/coords.rds")
+```
+
+```{r}
+#| eval: false 
+coords <- read_rds("data/rds/coords.rds")
+```
+
+These coordinates is then joined back to the `resale_tidy`
+
+```{r}
+#| eval: false 
+resale_tidy <- resale_tidy %>% 
+  left_join(coords)
+```
+
+Since the coords would appear as `longitude` and `latitude` which is not `sf` type and would be hard for later analysis, the code chunk below would use the `st_as_sf()` to convert it to a **POINT** geometric instead, then to make sure the `crs` is in correct format of 3414 I will also use `st_transform()`. This code chunk below would create `resale_tidy_final` data
+
+```{r}
+#| eval: false 
+resale_tidy_final <- resale_tidy %>%
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_transform(crs = 3414)
+```
+
+Just in case I will write this data to a rds file for later usage. 
+
+```{r}
+#| eval: false 
+write_rds(resale_tidy_final, "data/rds/resale_tidy_final.rds")
+```
+
+```{r}
+#| eval: false 
+resale_tidy_final <- read_rds("data/rds/resale_tidy_final.rds")
+```
+
+Now, since the study would be focusing on either 3 rooms, 4 rooms or 5 rooms units using 2023 data to predict July-September 2024 data. In this case I would be focusing on 3 rooms analysis and did one more wrangling to filter data to only include 2023 - Sep 2024 and for 3 room units.
+
+The code chunk below is for this wrangling process
+
+```{r}
+#| eval: false 
+resale_final <- resale_tidy_final %>%
+  filter(flat_type == '3 ROOM') %>%
+  filter(month >= "2023-01" & month <= "2024-09")
+```
+
+### CBD data
+
+CBD data is using the Master Plan 2014 Subzone Boundary (Web) which I would load and then filter out only the CBD region which includes 'DOWNTOWN CORE', 'MARINA EAST', 'MARINA SOUTH', 'MUSEUM', 'NEWTON', 'ORCHARD', 'OUTRAM', 'RIVER VALLEY', 'ROCHOR', 'SINGAPORE RIVER', 'STRAITS VIEW', `st_transform()` would also be used just in case in the code chunk below creating the `CBD` data
+
+```{r}
+#| eval: false 
+CBD <- st_read(dsn = "data/geo", 
+                layer = "MP14_SUBZONE_WEB_PL") %>%
+  filter(PLN_AREA_N %in% c('DOWNTOWN CORE', 'MARINA EAST', 'MARINA SOUTH',
+                           'MUSEUM', 'NEWTON', 'ORCHARD', 'OUTRAM',
+                           'RIVER VALLEY', 'ROCHOR', 'SINGAPORE RIVER',
+                           'STRAITS VIEW'))%>%
+  st_transform(crs = 3414)
+```
+
+### Mall list
+
+Since the data is extracted from Wikipedia and only include the mall names, I would need to somehow get the coordinates for these malls. But first the mall list is loaded in creating `mall_list`
+
+```{r}
+#| eval: false 
+mall_list <- read_csv("data/non-geo/mall_list.csv")
+```
+Similarly to the `resale` data I wil once again get the `unique` list of `name` instead of address this time with the code chunk below
+
+```{r}
+#| eval: false 
+mall_name <- sort(unique(mall_list$name))
+```
+
+Then this name list would be feed into the `get_coords()` function creating a new list of coordinations that has the name of the malls and its coords as `longitude` and `latitude` which is not `sf` type and would be hard for later analysis, the code chunk below would use the `st_as_sf()` to convert it to a **POINT** geometric instead and `st_transform()` used to make sure the crs is in correct format. All of this would be done in the code chunk below
+
+```{r}
+#| eval: false 
+mall_list_coords <- get_coords(mall_name) %>%
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_transform(crs = 3414)
+```
+
+Just in case I will write this data to a rds file for later usage. 
+
+```{r}
+#| eval: false 
+write_rds(mall_list_coords, "data/rds/mall_list_coords.rds")
+```
+
+```{r}
+#| eval: false 
+mall <- read_rds("data/rds/mall_list_coords.rds")
+```
+
+### Primary school list
+
+Firstly since the data Generalinformationofschools.csv file include the list of all schools I would need to extract data to get the necessary information such as name and address. This is done using the code chunk below
+
+```{r}
+#| eval: false 
+school_list <- read_csv("data/non-geo/Generalinformationofschools.csv") %>%
+  filter(mainlevel_code == 'PRIMARY') %>%
+  select(1,3)
+```
+Next similarly to the `resale` data or the `mall` data this address list would be feed into the `get_coords()` function creating a new list of coordinations as `longitude` and `latitude` which is not `sf` type and would be hard for later analysis, the code chunk below would use the `st_as_sf()` to convert it to a **POINT** geometric instead and `st_transform()` used to make sure the crs is in correct format. All of this would be done in the code chunk below
+
+```{r}
+#| eval: false 
+school_list_address <- sort(unique(school_list$address))
+school_list_coords <- get_coords(school_list_address) %>%
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_transform(crs = 3414)
+```
+
+Just in case I will also write this data to a rds file for later usage. 
+
+```{r}
+#| eval: false 
+write_rds(school_list_coords, "data/rds/school_list_coords.rds")
+```
+
+```{r}
+#| eval: false 
+primary_school <- read_rds("data/rds/school_list_coords.rds")
+```
+
+### MRT
+
+Since MRT data is already in geographical points I just need to load it in using the code chunk below
+
+```{r}
+#| eval: false 
+MRT <- st_read(dsn = "data/geo/LTAMRTStationExitGEOJSON.geojson") %>%
+  st_transform(crs = 3414)
+```
+
+### Preschool location
+
+Preschool data is already in geographical points I just need to load it in using the code chunk below
+
+```{r}
+#| eval: false 
+preschoolslocation <- st_read("data/geo/PreSchoolsLocation.geojson") %>%
+  st_transform(crs = 3414)
+```
+
+### Kindergartens
+
+Kindergartens data is already in geographical points I just need to load it in using the code chunk below
+
+```{r}
+#| eval: false 
+kindergartens <- st_read(dsn = "data/geo/Kindergartens.kml") %>%
+  st_transform(crs = 3414)
+```
+
+### Supermarkets
+
+Supermarkets data is already in geographical points I just need to load it in using the code chunk below
+
+```{r}
+#| eval: false 
+supermarkets <- st_read(dsn = "data/geo/SupermarketsKML.kml") %>%
+  st_transform(crs = 3414)
+```
+
+### Eldercare center
+
+Elder care center data is already in geographical points I just need to load it in using the code chunk below
+```{r}
+#| eval: false 
+eldercare <- st_read(dsn = "data/geo",
+                     layer = "ELDERCARE") %>%
+  st_transform(crs = 3414)
+```
+
+### Childcare center
+
+Childcare center data is already in geographical points I just need to load it in using the code chunk below
+
+```{r}
+#| eval: false 
+childcare <- st_read(dsn = "data/geo",
+                     layer = "CHILDCARE") %>%
+  st_transform(crs = 3414)
+```
+
+### Bus Stops
+
+Bus Stops data is already in geographical points I just need to load it in using the code chunk below. However I do notice during analysis that some of the Bus stops especially '46239', '46609', '47701', '46211', '46219' are located outside of Singapore hence I would remove them from this analysis
+
+```{r}
+#| eval: false 
+busstop <- st_read(dsn = "data/geo",
+                     layer = "BusStop") %>%
+  filter(!BUS_STOP_N %in% c('46239','46609','47701','46211','46219')) %>%
+  st_transform(crs = 3414)
+```
+
+### CHAS clinics 
+
+CHAS clinics data is already in geographical points I just need to load it in using the code chunk below. However I do notice during analysis that one of the clinic 'kml_271' is somehow located outside of Singapore hence I would remove them from this analysis
+
+```{r} 
+#| eval: false 
+CHAS <- st_read(dsn = "data/geo/CHASClinics.kml") %>%
+  filter(Name != 'kml_271')%>%
+  st_transform(crs = 3414)
+```
+
+### Market and foodcentres
+
+Market and foodcentres data is already in geographical points I just need to load it in using the code chunk below
+
+```{r} 
+#| eval: false 
+market_foodcentre <- st_read(dsn = "data/geo/NEAMarketandFoodCentre.geojson") %>%
+  st_transform(crs = 3414)
+```
+
+### Parks
+
+Parks data is already in geographical points I just need to load it in using the code chunk below
+
+```{r} 
+#| eval: false 
+park <- st_read(dsn = "data/geo/ParkFacilitiesGEOJSON.geojson") %>%
+  st_transform(crs = 3414)
+```
+
+## 3.2 Second phase of data preparation and wrangling
+
+Once all the data are loaded in I will move on to the next step of calculating the geographical proximity and the number of facilities within a radius of HDB units.
+
+First I will create 2 buffer zone data for these unit at 1000 m or 1 km and 350 m separately. The code chunk below will be for this purpose
+
+```{r}
+#| eval: false 
+buffer_1km_HDB  <- st_buffer(resale_final,
+                             dist = 1000)
+```
+
+```{r}
+#| eval: false 
+buffer_350m_HDB  <- st_buffer(resale_final,
+                             dist = 350)
+```
+
+Once the buffer zones are created, new columns are created for the `resale_final` and they each represent the number of facilities within a radius of HDB units either 350 m or 1 km. The function to calculate this number would be based on the `lengths(st_intersects(bufferzone, facility))`.
+
+```{r}
+#| eval: false 
+resale_final$within_350m_kindergartens <- lengths(st_intersects(buffer_350m_HDB, kindergartens))
+resale_final$within_350m_childcare <- lengths(st_intersects(buffer_350m_HDB, childcare))
+resale_final$within_350mm_busstop <- lengths(st_intersects(buffer_350m_HDB, busstop))
+resale_final$within_350mm_preschoolslocation <- lengths(st_intersects(buffer_350m_HDB, preschoolslocation))
+resale_final$within_1km_chas <- lengths(st_intersects(buffer_1km_HDB, CHAS))
+resale_final$within_1km_primary_school <- lengths(st_intersects(buffer_1km_HDB, primary_school))
+```
+
+Next new columns are created for the `resale_final` and they each represent the minimum distance from a unit to another region (CBD) or to another facility. This calculation is based on the `min(st_distance(HDB, location)))/1000` or is in kilometer shortest distance
+```{r}
+#| eval: false 
+resale_final <- resale_final %>%
+  rowwise() %>%
+  mutate(prox_CBD =  as.numeric(min(st_distance(geometry, CBD)))/1000) %>%
+  mutate(prox_eldercare =  as.numeric(min(st_distance(geometry, eldercare)))/1000) %>%
+  mutate(prox_market_foodcentre =  as.numeric(min(st_distance(geometry, market_foodcentre)))/1000) %>%
+  mutate(prox_MRT =  as.numeric(min(st_distance(geometry, MRT)))/1000) %>%
+  mutate(prox_park =  as.numeric(min(st_distance(geometry, park)))/1000) %>%
+  mutate(prox_mall =  as.numeric(min(st_distance(geometry, mall)))/1000) %>%
+  mutate(prox_supermarkets =  as.numeric(min(st_distance(geometry, supermarkets)))/1000)
+```
+
+Once all this caluclation is done I will write this data to a rds file for later usage. 
+
+```{r}
+#| eval: false 
+write_rds(resale_final, "data/rds/resale_final.rds")
+```
+
+## 3.3 Third phase of data preparation and wrangling
+
+This will be the final phase to get all the dat needed for the analysis
+
+Firstly, I will be selecting only the columns that is needed for the analysis using the code chunk below
+
+```{r}
+resale_final <- read_rds("data/rds/resale_final.rds") %>%
+  select(month, resale_price, floor_area_sqm, storey_level, remaining_lease_time,
+         prox_CBD, prox_eldercare, prox_market_foodcentre, prox_MRT,
+         prox_park, prox_mall, prox_supermarkets, within_350m_kindergartens,
+         within_350m_childcare, within_350mm_busstop, 
+         within_350mm_preschoolslocation, within_1km_chas, 
+         within_1km_primary_school)
+```
+
+Next I will check for the duplicated point using the sum of multiplicity or `sum(multiplicity())`, `multiplicity()` is part of `spatstat` package to count the number of duplicates for each point in a spatial point pattern
+
+```{r}
+#| eval: false 
+sum(multiplicity(resale_final) > 1)
+```
+
+:::callout-note
+
+The above code would return a results of 12 duplicated units points, this has been cut off from running since it taking a long time to run. This indicates that there are units that could be in the same building block or very unlikely, sold multiple time during the study period.
+
+:::
+
+
+To resolve this issue I will be using `st_jitter()` to which techincally moving points within a short distance to address overlapping points issue. In this case I will move them within a 5 meter radius. The code chunk below is used to do this.
+
+
+```{r}
+resale_final <- st_jitter(resale_final, amount = 5)
+```
+
+Once this is done we could no longer see any duplicate point by rerunning the previous code/
+
+```{r}
+sum(multiplicity(resale_final) > 1)
+```
+
+Now, since the task specifically specify that I would be using  HDB resale transaction records in 2023 to predict HDB resale prices between July-September 2024. I will split them into 2 part call `resale_main` and `resale_check` filtered by the specific period.
+
+```{r}
+resale_main <- resale_final %>%
+  filter(month >= "2023-01" & month <= "2023-12")
+
+resale_check <- resale_final %>%
+  filter(month >= "2024-07" & month <= "2024-09")
+```
+
+Next, they would be turn into the data that would be used for training and data for testing and prediction specifically call `train_data` and `test_data`. The code chunk below will be doing the above and I will write this data to a rds file for later usage. 
+
+```{r}
+set.seed(1234)
+
+train_data <- resale_main
+coords_train <- st_coordinates(resale_main)
+
+train_data <- write_rds(train_data, "data/rds/train_data.rds")
+coords_train <- write_rds(coords_train, "data/rds/coords_train.rds" )
+
+test_data <- resale_check
+coords_test <- st_coordinates(resale_check)
+
+test_data <- write_rds(test_data, "data/rds/test_data.rds")
+coords_test <- write_rds(coords_test, "data/rds/coords_test.rds" )
+```
+
+Next I would want to check how is the data is doing and see if there was any issue with **Collinearity**. To do this I would first create a new data set without its geometry using the code chunk below
+
+
+```{r, fig.width=10, fig.height=8, dpi=100}
+resale_main_nogeo <- resale_main %>%
+  st_drop_geometry()
+```
+
+This data would then be checked for **Collinearity** using the `corrplot()` of `corrplot` package in the code chunk below
+
+```{r, fig.height=9, fig.width=9, dpi=100}
+corrplot::corrplot(cor(resale_main_nogeo[, 2:17]), 
+                   diag = FALSE, 
+                   order = "AOE",
+                   tl.pos = "td", 
+                   tl.cex = 0.5, 
+                   method = "number", 
+                   type = "upper")
+```
+
+:::callout-note
+
+Since none of the correlation is higher/lower than +- 0.7, I will be keeping all the variables for this study
+
+:::
+
+```{r}
+train_data <- read_rds("data/rds/train_data.rds")
+test_data <- read_rds("data/rds/test_data.rds")
+coords_train <- read_rds("data/rds/coords_train.rds" )
+coords_test <- read_rds("data/rds/coords_test.rds" )
+```
+
+
+# 4. Model bulding and callibation
+
+## 4.1 Non-spatial multiple linear regression
+
+The code chunk below will build the multiple linear regression using the `lm()` of `stats` package to  fit linear multivariate models, all the previously mentioned predictors and variables are included to build this model. Then we would use the `ols_regress()` of `olsrr` to perform the Ordinary least squares regression
+
+```{r}
+set.seed(1234)
+price_mlr <- lm(resale_price ~ floor_area_sqm + storey_level + 
+                  remaining_lease_time + prox_CBD + prox_eldercare + 
+                  prox_market_foodcentre + prox_MRT + prox_park + prox_mall +
+                  prox_supermarkets + within_350m_kindergartens +
+                  within_350m_childcare + within_350mm_busstop + 
+                  within_350mm_preschoolslocation + within_1km_chas +
+                  within_1km_primary_school,
+                data=train_data)
+olsrr::ols_regress(price_mlr)
+```
+
+:::callout-note
+
+The model has an Adj. R-Squared of 0.766 which is not bad but also not great and I believe we could do better than this, ANOVA results show that the differences between variables are statistically significant and are unlikely to be due to chance
+
+Its AIC (Akaike Information Criteria) 153589.830 would be kept in mind for later comparison of other models
+
+:::
+
+Next we will calculating the variance inflation factor (VIF) using the `check_collinearity()` of the `performance` package, and then explore its results within the table created by the `kable()` from either `kableExtra` or `knitr` package
+
+```{r}
+vif <- check_collinearity(price_mlr)
+kable(vif, 
+      caption = "Variance Inflation Factor (VIF) Results") %>%
+  kable_styling(font_size = 18) 
+```
+
+:::callout-note
+
+VIF itself is below 5 and tolerance is within the 0.25 to 4 hence indicating that there is unlikely any issue with multicollinearity with this regression model
+
+:::
+
+The plot below is to better visualize the VIF 
+
+```{r, fig.height=9, fig.width=12, dpi=100}
+plot(vif) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 4.2 Geographically Weighted Regression with gwr method
+
+Next I would try out the Geographically Weighted Regression or gwr method using `GWmodel` package, however just running the model and then calibrating them would take a lot of time hence I would be calibrating the model at the same time.
+
+The first step is to calibrate the model by calculating the adaptive bandwidth based on the training data or `train_data`. To do this `bw.gwr()` would be used in the code chunk below creating the `bw_adaptive`
+
+```{r}
+#| eval: false 
+set.seed(1234)
+bw_adaptive <- bw.gwr(resale_price ~ floor_area_sqm + storey_level + 
+                        remaining_lease_time + prox_CBD + prox_eldercare + 
+                        prox_market_foodcentre + prox_MRT + prox_park + prox_mall +
+                        prox_supermarkets + within_350m_kindergartens +
+                        within_350m_childcare + within_350mm_busstop + 
+                        within_350mm_preschoolslocation + within_1km_chas +
+                        within_1km_primary_school,
+                      data=train_data,
+                      approach="CV",
+                      kernel="gaussian",
+                      adaptive=TRUE,
+                      longlat=FALSE)
+```
+
+Once this has finished running I will write this data to a rds file for later usage 
+
+```{r}
+#| eval: false 
+write_rds(bw_adaptive, "data/rds/bw_adaptive.rds")
+```
+
+```{r}
+bw_adaptive <- read_rds("data/rds/bw_adaptive.rds")
+bw_adaptive
+```
+The results is that the calibrated adaptive bandwidth for the model should be 38
+
+The next step is 
+
+```{r}
+#| eval: false 
+set.seed(1234)
+gwr_adaptive <- gwr.basic(formula = resale_price ~ floor_area_sqm + storey_level + 
+                            remaining_lease_time + prox_CBD + prox_eldercare + 
+                            prox_market_foodcentre + prox_MRT + prox_park + prox_mall +
+                            within_350m_childcare + within_350mm_busstop + 
+                            within_350mm_preschoolslocation + within_1km_chas +
+                            within_1km_primary_school,
+                          data=train_data,
+                          bw=bw_adaptive, 
+                          kernel = 'gaussian', 
+                          adaptive=TRUE,
+                          longlat = FALSE)
+```
+
+Once this has finished running I will write this data to a rds file for later usage 
+
+```{r}
+#| eval: false 
+write_rds(gwr_adaptive, "data/rds/gwr_adaptive.rds")
+```
+
+```{r}
+gwr_adaptive <- read_rds("data/rds/gwr_adaptive.rds")
+gwr_adaptive
+```
+
+:::callout-note
+
+Interestingly this gwr.basic() also include the results of another linear regression hence we could quickly compare this result of the GWR model with the previously ran linear model. In this case the Adjusted R-square value of the GWR model is 0.9311223 sinificantly better than 0.76 of the Multilinear regression model. In addition to this its AIC is also at 146751.4 lower than 153694.5 in this model ore the previously recorded 153589.830.
+
+Overall this Geographically Weighted Regression model seems to perform significantly better than the Multilinear regression model
+
+:::
+
+Next I'll calculate the calibration bandwidth for the testing data or `test_data`
+```{r}
+#| eval: false 
+set.seed(1234)
+gwr_bw_test_adaptive <- bw.gwr(resale_price ~ floor_area_sqm + storey_level + 
+                                 remaining_lease_time + prox_CBD + prox_eldercare + 
+                                 prox_market_foodcentre + prox_MRT + prox_park + prox_mall +
+                                 prox_supermarkets + within_350m_kindergartens +
+                                 within_350m_childcare + within_350mm_busstop +
+                                 within_350mm_preschoolslocation + within_1km_chas +
+                                 within_1km_primary_school,
+                               data=test_data,
+                               approach="CV",
+                               kernel="gaussian",
+                               adaptive=TRUE,
+                               longlat=FALSE)
+```
+
+Once this has finished running I will write this data to a rds file for later usage 
+
+```{r}
+#| eval: false 
+write_rds(gwr_bw_test_adaptive, "data/rds/gwr_bw_test_adaptive.rds")
+```
+
+```{r}
+gwr_bw_test_adaptive <- read_rds("data/rds/gwr_bw_test_adaptive.rds")
+gwr_bw_test_adaptive
+```
+The results is that the calibrated adaptive bandwidth for the test data should be 38
+
+Next I would attempt to predict the data based on the `train_data` and `test_data` to have something for comparison
+
+```{r}
+#| eval: false 
+set.seed(1234)
+gwr_pred <- gwr.predict(resale_price ~ floor_area_sqm + storey_level +
+                          remaining_lease_time + prox_CBD + prox_eldercare +
+                          prox_market_foodcentre + prox_MRT + prox_park + prox_mall +
+                          prox_supermarkets + within_350m_kindergartens +
+                          within_350m_childcare + within_350mm_busstop +
+                          within_350mm_preschoolslocation + within_1km_chas +
+                          within_1km_primary_school,
+                        data=train_data,
+                        predictdata = test_data,
+                        bw=287,
+                        kernel = 'gaussian',
+                        adaptive=TRUE,
+                        longlat = FALSE)
+```
+
+:::callout-note
+
+Unfortunately, I was not able to overcame the "no regression point is fixed" error for this `gwr.predict()` function and unable to showcase them here
+
+:::
+
+
+## 4.3 Geographically Weighted Random Forest method of SpatialML package
+
+First let drop the geometry column of training data sets
+```{r}
+train_data <- train_data %>% 
+  st_drop_geometry()
+```
+
+Then we would run an inital Random Forest model with default setting to check how well the model would turn out using the `ranger()` of `ranger` package. In addition, I will reduce the number of tree down to 53 instead of 500 since 500 trees would take a lot of time to run for later calibration
+
+
+```{r}
+#| eval: false
+set.seed(1234)
+rf <- ranger(resale_price ~ floor_area_sqm + storey_level + 
+               remaining_lease_time + prox_CBD + prox_eldercare + 
+               prox_market_foodcentre + prox_MRT + prox_park + prox_mall +
+               prox_supermarkets + within_350m_kindergartens +
+               within_350m_childcare + within_350mm_busstop + 
+               within_350mm_preschoolslocation + within_1km_chas +
+               within_1km_primary_school,
+             num.trees = 53,
+             mtry = 5,
+             importance = "impurity",
+             data=train_data)
+
+```
+
+Once this has finished running I will write this data to a rds file for later usage 
+
+```{r}
+#| eval: false 
+write_rds(rf, "data/rds/rf.rds")
+```
+
+```{r}
+rf <- read_rds("data/rds/rf.rds")
+rf
+```
+
+:::callout-note
+
+This model return a OOB prediction error (MSE) of 636284892 and R squared (OOB) of 0.9184915, based on R squared alone this is a pretty good model.
+
+:::
+
+Next I will attempt to calibrate this model using the `bw_adaptive` of 38 calculated previously and using the `grf()` of `SpacialML` package. This would fit a local version of the Random Forest algorithm, accounting for spatial non-stationarity
+
+The code chunk below show the code for this.
+
+```{r}
+#| eval: false
+set.seed(1234)
+gwRF_adaptive <- grf(formula = resale_price ~ floor_area_sqm + storey_level + 
+                       remaining_lease_time + prox_CBD + prox_eldercare + 
+                       prox_market_foodcentre + prox_MRT + prox_park + prox_mall +
+                       prox_supermarkets + within_350m_kindergartens +
+                       within_350m_childcare + within_350mm_busstop + 
+                       within_350mm_preschoolslocation + within_1km_chas +
+                       within_1km_primary_school,
+                     dframe=train_data,
+                     ntree = 53,
+                     bw=38,
+                     kernel="adaptive",
+                     coords=coords_train)
+```
+
+Once this has finished running I will write this data to a rds file for later usage 
+
+```{r}
+#| eval: false 
+write_rds(gwRF_adaptive, "data/rds/gwRF_adaptive.rds")
+```
+
+```{r}
+gwRF_adaptive <- read_rds("data/rds/gwRF_adaptive.rds")
+```
+
+![](1.png)
+```{r}
+gwRF_adaptive$LocalModelSummary
+```
+
+:::callout-note
+
+The results show both Global ML and Local model with R-squared (Not OOB) at 97.845 and R-squared predicted (Not OOB) at 98.947 respectively, which is quite good. In addition to this all AIC metrics (Not OOB) is at 120401.135 and and 115853.725. This seems to indicate that the local of calibrated version of the Geographically Weighted Random Forest seems to be a better model compared to the model ran by default.
+
+Overall, the Machine Learning method of Geographically Weighted Random Forest is performing the best compared to the Geographically Weighted Regression or the Non-spatial multiple linear regression
+
+The overall trade of is time to run a actually calibrate the model could take a while, for my calibrated Geographically Weighted Random Forest it tooks around 4 hours to finish. Geographically Weighted Regression or the Non-spatial multiple linear regression are performing much better in this regards.
+
+:::
+
+Now that the model is inplace, I'll try to actually predict the data for the July to Sep 2024. Since this the best model, it would be best to use this model to predict data itself to show case its accuracy.
+
+First step is to drop the geometry column of test data sets `test_data`
+
+```{r}
+test_data <- cbind(test_data, coords_test) %>%
+  st_drop_geometry()
+```
+
+Then the data would be predicted using the `predict.grf()` method of SpatialML package
+
+```{r}
+#| eval: false 
+set.seed(1234)
+gwRF_pred <- predict.grf(gwRF_adaptive, 
+                         test_data, 
+                         x.var.name="X",
+                         y.var.name="Y", 
+                         local.w=1,
+                         global.w=0)
+```
+
+Once this has finished running I will write this data to a rds file for later usage 
+
+```{r}
+#| eval: false 
+GRF_pred <- write_rds(gwRF_pred, "data/rds/GRF_pred.rds")
+```
+
+Now with the newly created prediction data, they would be mapped to the original `test_data` using `cbind()` of base R code
+
+```{r}
+GRF_pred <- read_rds("data/rds/GRF_pred.rds")
+GRF_pred_df <- as.data.frame(GRF_pred)
+test_data_p <- cbind(test_data, GRF_pred_df)
+```
+
+Once this has finished running I will write this data to a rds file for later usage 
+
+```{r}
+#| eval: false 
+write_rds(test_data_p, "data/rds/test_data_p.rds")
+```
+
+```{r}
+test_data_p <- read_rds("data/rds/test_data_p.rds")
+```
+
+Let's quickly check the root Root Mean Squared Error between the actual resale price and the predicted data
+
+```{r}
+Metrics::rmse(test_data_p$resale_price, 
+     test_data_p$GRF_pred)
+```
+
+I would now use the `ggplot()` of `ggplot2` package to plot out this grapoh showing prediction data compared to actual data
+
+```{r, fig.height=9, fig.width=9, dpi=100}
+theme_set(theme_light())
+ggplot(data = test_data_p,
+       aes(x = GRF_pred/1000,
+           y = resale_price/1000)) +
+  geom_point() +
+  ggtitle("Model prediction graph") +
+  xlab("Resale price (predicted) thousands $SGD") +
+  ylab("Resale price (actual) thousands $SGD") +
+  geom_abline(color = "blue4", size = 1)
+```
+
+:::callout-note
+
+The graph has an diagonal line and the closer the dots are to the line the more accurate the results were. From initial observation it seems that the model has done ok in term of predicting the resale price of HDB units. 
+
+However it seems there maybe more or less variables that could be added in or removed to calibrate the model further make its prediction event more accurate. There seems to be more points on the left of the line rather than the right, this signify that the predicted price are often lower than the actual resale prices. This does make sense as all our data actually did not include any economics indicators such as inflation, tax rate raise (2024 in Singapore), etc. Including these metrics in to the model building would greatly improve the model.
+
+In addition, the appearance of outliers, points more on the top left and top rights has also impacted the model itself and its prediction capability. The exclusion of these outliers could potentially be beneficial for the building of a better model as well.
+
+:::
+
+# 5. Conclusion
+
+On the above exercise I had test out and calibrate 3 different model Non-spatial multiple linear regression, Geographically Weighted Regression and Geographically Weighted Random Forest. Out of 3 of them the Geographically Weighted Random Forest seems to be performing the best and its predict results seem be most accurate.
+
+Outliers seem to be a potential issue that could impact the prediction power and accuracy of model building. In addition more metrics such as economic indicators are likely important and should be considered further.
+
+Overall this has show case the capability of different model building method for geographical data that could be use in the future for common goods to predicts much more than just the data in this study

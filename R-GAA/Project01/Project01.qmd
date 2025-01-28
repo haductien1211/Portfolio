@@ -1,0 +1,337 @@
+---
+title: "Project 1"
+author: "Ha Duc Tien"
+date: "August 24, 2024"
+date-modified: "last-modified"
+execute: 
+  eval: true
+  echo: true
+  warning: false
+  freeze: true
+---
+
+# 1. Overview and Objective
+
+Previous studies have demonstrated the significant potential of Spatial Point Patterns Analysis (SPPA) in exploring and identifying factors influencing road traffic accidents. However, these studies often focus solely on either behavioral or environmental factors, with limited consideration of temporal factors such as season, day of the week, or time of day.
+
+-   In view of this, I am tasked to discover factors affecting road traffic accidents in the Bangkok Metropolitan Region BMR by employing both spatial spatio-temporal point patterns analysis methods.
+
+The specific objectives of this take-home exercise are as follows:
+
+-   To visualize the spatio-temporal dynamics of road traffic accidents in BMR using appropriate statistical graphics and geovisualization methods.
+-   To conduct detailed spatial analysis of road traffic accidents using appropriate Network Spatial Point Patterns Analysis methods.
+-   To conduct detailed spatio-temporal analysis of road traffic accidents using appropriate Temporal Network Spatial Point Patterns Analysis methods.
+
+# 2. Getting started
+
+In this exercise, the below R packages will be used. They are:
+
+-   [`sf`](https://r-spatial.github.io/sf/) for importing, managing, and processing geospatial data, and
+-   [`tidyverse`](https://www.tidyverse.org/) for performing data science tasks such as importing, wrangling and visualising data.
+-   [`spatstat`](https://spatstat.org/), which has a wide range of useful functions for point pattern analysis.
+-   [`raster`](https://cran.r-project.org/web/packages/raster/) which reads, writes, manipulates, analyses and model of gridded spatial data
+-   [`maptools`](https://cran.r-project.org/web/packages/maptools/index.html) which provides a set of tools for manipulating geographic data.
+-   [`tmap`](https://cran.r-project.org/web/packages/tmap/index.html) which provides functions for plotting cartographic quality static point patterns maps or interactive maps by using leaflet API.
+-   [spNetwork](https://cran.r-project.org/web/packages/spNetwork/index.html), which provides functions to perform Spatial Point Patterns Analysis such as kernel density estimation (KDE) and K-function on network. It also can be used to build spatial matrices (‘listw’ objects like in ‘spdep’ package) to conduct any kind of traditional spatial analysis with spatial weights based on reticular distances.
+
+```{r}
+pacman::p_load(raster, spatstat, tmap, tidyverse, sparr, maptools, spNetwork, sf)
+```
+
+# 3. The data
+
+For the purpose of this exercise, three basic data sets must be used, they are:
+
+-   [Thailand Road Accident (2019-2022)](https://www.kaggle.com/datasets/thaweewatboy/thailand-road-accident-2019-2022) on Kaggle
+
+-   [Thailand Roads (OpenStreetMap Export)](https://data.humdata.org/dataset/hotosm_tha_roads) on HDX.
+
+-   [Thailand - Subnational Administrative Boundaries](https://data.humdata.org/dataset/cod-ab-tha?) on HDX.
+
+## Importing and wrangling the data
+
+The below code would import the **Thailand Road Accident (2019-2022)**, make changes to the coordinates by filtering out the ones with empty or NA coordinates then filter out the region of study which is the Bangkok Metropolitan Region BMR and converting the projected coordinate system of data to WGS 84 / UTM zone 47N and the EPSG code is 32647. The operation would also create 2 new columns that has the Month and the Year of the date accidents occured. This step would create `accident_data_sf`
+
+```{r}
+accident_data_sf <- read_csv("data/nongeo/thai_road_accident_2019_2022.csv") %>%
+  filter(!is.na(longitude) & longitude != "",
+         !is.na(latitude) & latitude != "") %>%
+  st_as_sf(coords = c("longitude", "latitude"), 
+           crs = 4326) %>%
+  filter(province_en %in% list("Bangkok", "Nonthaburi", 
+                                           "Nakhon Pathom", "Pathum Thani", 
+                                           "Samut Prakan", "Samut Sakhon")) %>%
+  mutate(`incident_monthyear` = format(as.Date(`incident_datetime`), "%Y/%m")) %>%
+  mutate(`incident_year` = format(as.Date(`incident_datetime`), "%Y")) %>%
+  st_transform(crs = 32647)
+```
+
+```{r}
+str(accident_data_sf)
+```
+
+This part is to import **Thailand Roads (OpenStreetMap Export)** and converting the projected coordinate system of data to WGS 84 / UTM zone 47N and the EPSG code is 32647 to create `THR_sf`
+
+```{r}
+THR_sf <- st_read(dsn = "data/geo", 
+                         layer = "hotosm_tha_roads_lines_shp")
+THR_sf <-  st_set_crs(THR_sf, 32647)
+```
+This part is to import **Thailand - Subnational Administrative Boundaries** as well as filtering out the region of study which is the Bangkok Metropolitan Region BMR and converting the projected coordinate system of data to WGS 84 / UTM zone 47N and the EPSG code is 32647 to create `THSAB_sf`
+
+```{r}
+THSAB_sf <- st_read(dsn = "data/geo", 
+                         layer = "tha_admbnda_adm2_rtsd_20220121") %>%
+  filter(ADM1_EN %in% list("Bangkok", "Nonthaburi", "Nakhon Pathom",
+                      "Pathum Thani", "Samut Prakan", "Samut Sakhon")) %>%
+  st_transform(crs = 32647)
+
+```
+
+# 4. Analysis
+
+## 4.1 Quick analysis
+
+Now let's take a quick look at temporal distribution of accidents data. The idea of this is to identify whether there is any identifiable temporal patterns in the distribution of accidents.
+
+To to this I will be plotting a bar chart showing the counts of accidents months on end from 2019 to 2022.
+
+
+```{r fig.height=6, fig.width=24, dpi=100}
+ggplot(accident_data_sf) +
+  geom_bar(aes(x = incident_monthyear), 
+                 bin = 100, 
+                 color="black", 
+                 fill="light blue") +
+  xlab("Time")
+```
+
+:::callout-note
+
+The above graph review that accident tends to peak around January April, July, October and December. Interestingly, these period seems to coincide with holidays seasons in Thailand.
+
+:::
+
+But what about the year by year number of cases ?
+
+```{r fig.height=6, fig.width=12, dpi=100}
+ggplot(accident_data_sf) +
+  geom_bar(aes(x = incident_year),
+                 color="black", 
+                 fill="light blue") +
+  xlab("Province")
+```
+
+:::callout-note
+
+The above graph review that number of accidents are around the same over the year and does not seem to be getting better.
+
+:::
+
+But how about the distribution of cases of the different region within the review region?
+
+```{r fig.height=6, fig.width=12, dpi=100}
+ggplot(accident_data_sf) +
+  geom_bar(aes(x = province_en),
+                 color="black", 
+                 fill="light blue") +
+  xlab("Province")
+```
+
+:::callout-note
+
+The above results shown that majority of accidents cases from 2019 to 2022 is actually from Bangkok province itself which does make sense since the concentration of population are probably in this region as well which leads to higher traffics
+
+:::
+
+The graphs below are showcasing the Distribution of accidents in different scale from **overall** to **year by year** and to **month by year**
+
+```{r fig.height=9, fig.width=12, dpi=100}
+tmap_mode('plot')
+tm_shape(THSAB_sf) +
+  tm_polygons() +
+tm_shape(accident_data_sf) +
+  tm_dots(size = 0.01, "red") +
+tm_layout(main.title = "Distribution of accidents")
+# tm_shape(THR_sf) +
+#   tm_lines()
+```
+
+
+```{r fig.height=9, fig.width=12, dpi=100}
+tm_shape(THSAB_sf) +
+  tm_polygons() +
+tm_shape(accident_data_sf) +
+  tm_dots(size = 0.01, "red") +
+tm_facets(by = "incident_year",
+          free.coords = FALSE,
+          free.scales = FALSE,
+          drop.units = TRUE) +
+tm_layout(main.title = "Distribution of accidents by year")
+```
+
+```{r fig.height=18, fig.width=54, dpi=100}
+tm_shape(THSAB_sf) +
+  tm_polygons() +
+tm_shape(accident_data_sf) +
+  tm_dots(size = 0.1, "red") +
+tm_facets(by = "incident_monthyear",
+          free.coords = FALSE,
+          free.scales = FALSE,
+          drop.units = TRUE,
+          ncol = 12,
+          nrow = 4)+
+tm_layout(main.title = "Distribution of accidents by month by year")
+```
+
+:::callout-note
+
+The most comprehensive one are probably the month by year distribution which showcase the changes of distribution of accidents depending on the period and different seasons
+
+:::
+
+## 4.2 First-order Spatial Point Patterns Analysis
+
+Kernel Density Estimation
+
+### Geospatial Data wrangling
+
+The code chunk below uses as_Spatial() of sf package to convert the three geospatial data from simple feature data frame to sp’s Spatial* class.
+
+```{r}
+accident_data <- as_Spatial(accident_data_sf)
+THSAB <- as_Spatial(THSAB_sf)
+```
+
+spatstat requires the analytical data in ppp object form. There is no direct way to convert a Spatial* classes into ppp object. We need to convert the Spatial classes* into Spatial object first.
+
+The codes chunk below converts the Spatial* classes into generic sp objects.
+
+```{r}
+accident_data_sp <- as(accident_data, "SpatialPoints")
+THSAB_sp <- as(THSAB, "SpatialPolygons")
+```
+
+We can check the duplication in a ppp object by using the code chunk below.
+
+```{r}
+accident_data_ppp <- as.ppp(accident_data_sf)
+any(duplicated(accident_data_ppp))
+```
+Since the results return false there's no duplicated points in the data
+
+```{r fig.height=18, fig.width=54, dpi=100}
+plot(accident_data_ppp)
+```
+
+### Creating owin object
+
+The code chunk below is used to covert the SpatialPolygon object into owin object of `spatstat`
+
+```{r}
+THSAB_owin <- as.owin(THSAB_sf)
+```
+
+
+### Rescalling KDE values
+
+we will extract childcare events that are located within the review region and re-scale the unit of measurement from meter to kilometer by using the code chunk below.
+
+```{r}
+accident_data_owin_ppp <- accident_data_ppp[THSAB_owin]
+accident_data_owin_ppp.km <- rescale.ppp(accident_data_owin_ppp, 1000, "km")
+```
+
+Now, we can run `density()` using the resale data set and plot the output kde map. In this case I'll be using bw.diggle() since it seems to be working best
+
+```{r fig.height=9, fig.width=12, dpi=100}
+kde_accident_data_bw <- density(accident_data_owin_ppp.km,
+                              sigma=bw.diggle,
+                              edge=TRUE,
+                              kernel="gaussian") 
+plot(kde_accident_data_bw, main = "Fixed bandwidth")
+```
+
+To compared the above method I'll also be running another density using adaptive method
+
+```{r fig.height=9, fig.width=12, dpi=100}
+kde_accident_data_adaptive <- adaptive.density(accident_data_owin_ppp.km, method="kernel")
+plot(kde_accident_data_adaptive, main = "Adaptive bandwidth")
+```
+
+:::callout-note
+
+Both graph produce roughly the same results which highlight some of the hot zone of accidents that could happen throughout the period. The KDE shown that there are hotspots in the roads between Bangkok - Samut Prakan, Bangkok - Pathum Thani and with a lower but still significant hotspot between Bangkok - Nakhon Pathom and Bangkok - Samut Sakhon
+
+:::
+
+### Testing spatial point patterns using Clark and Evans Test
+
+```{r}
+
+clarkevans.test(accident_data_ppp,
+                correction="none",
+                clipregion="THSAB_owin",
+                alternative=c("clustered"),
+                nsim=99)
+```
+:::callout-note
+
+From the test results, we rejected the null hypothesis that the point patterns are randomly distributed.
+
+:::
+
+## 4.3 Second-order Spatial Point Patterns Analysis
+
+### Analysing Spatial Point Process Using G-Function
+
+```{r fig.height=9, fig.width=12, dpi=100}
+G_CK = Gest(accident_data_ppp, correction = "border")
+plot(G_CK, xlim=c(0,2000))
+```
+
+### Performing Complete Spatial Randomness Test Using G-Function
+
+```{r fig.height=9, fig.width=12, dpi=100}
+G_CK.csr <- envelope(accident_data_ppp, Gest, nsim = 999)
+plot(G_CK.csr)
+```
+
+:::callout-note
+
+From the test results it seems likely that the null hypothesis is rejected and distribution of accidents at Bangkok Metropolitan Region BMR is not randomly distributed. The estimated G(r) lies above the upper envelope, the estimated G(r) is statistically significant
+
+:::
+
+### Analysing Spatial Point Process Using F-Function
+
+```{r fig.height=9, fig.width=12, dpi=100}
+F_CK = Fest(accident_data_ppp)
+plot(F_CK)
+```
+
+
+### Performing Complete Spatial Randomness Test Using F-Function
+
+```{r fig.height=9, fig.width=12, dpi=100}
+F_CK.csr <- envelope(accident_data_ppp, Fest, nsim = 999)
+plot(F_CK.csr)
+```
+
+
+:::callout-note
+
+From the test results it seems likely that the null hypothesis is rejected and distribution of accidents at Bangkok Metropolitan Region BMR is not randomly distributed
+
+:::
+
+
+# 5. Conclusion
+
+The above results shown that majority of accidents cases from 2019 to 2022 is actually from Bangkok province itself which does make sense since the concentration of population are probably in this region as well which leads to higher traffics. The initial analysis shown that that accident tends to peak around January April, July, October and December. Interestingly, these period seems to coincide with holidays seasons in Thailand.
+
+The KDE shown that there are hotspots in the roads between Bangkok - Samut Prakan, Bangkok - Pathum Thani and with a lower but still significant hotspot between Bangkok - Nakhon Pathom and Bangkok - Samut Sakhon
+
+The statistical test seems to reject the idea that the accidents are randomly distributed and hence it is likely that there are pattern within these accidents hotspots of which some has been highlighted due to potentially holiday period and concentration of traffics
+
+Further investigation including different time of date and the hotspot changes throughout different period, seasons, weather changes should be studied further in this case to gain a more comprehensive understanding of the changes of accidents distributions 
