@@ -73,6 +73,7 @@ Realis <- read_csv(list_of_files)
 
 ```{r}
 glimpse(Realis)
+head(Realis)
 summary(Realis)
 colSums(is.na(Realis))
 ```
@@ -319,7 +320,7 @@ plot4 <- ggplot(data = Realis, aes(x = `Sale Month`)) +
     scale_x_discrete(name ="Sale Month", 
                      limits = c("Jan 2023", "Feb 2023", "Mar 2023", 
                         "Apr 2023","May 2023","Jun 2023", 
-                        "Jul 2023", "Aug 2023", "Sep 2023",
+                        "Jul 2023", "Aug 2023", "Sept 2023",
                         "Oct 2023", "Nov 2023", "Dec 2023", 
                         "Jan 2024", "Feb 2024", "Mar 2024")) +
   
@@ -336,7 +337,7 @@ plot5 <- ggplot(data = Realis, aes(x = `Sale Month`, y = `Unit Price ($ PSM)`)) 
     scale_x_discrete(name ="Sale Month",
                    limits = c("Jan 2023", "Feb 2023", "Mar 2023",
                       "Apr 2023","May 2023","Jun 2023",
-                      "Jul 2023", "Aug 2023", "Sep 2023",
+                      "Jul 2023", "Aug 2023", "Sept 2023",
                       "Oct 2023", "Nov 2023", "Dec 2023",
                       "Jan 2024", "Feb 2024", "Mar 2024")) +
     
@@ -358,7 +359,7 @@ by_month <- Realis %>%
 by_month$`Sale Month` <- factor(by_month$`Sale Month`, 
                                 levels = c("Jan 2023", "Feb 2023", "Mar 2023",
                                             "Apr 2023","May 2023","Jun 2023",
-                                            "Jul 2023", "Aug 2023", "Sep 2023",
+                                            "Jul 2023", "Aug 2023", "Sept 2023",
                                             "Oct 2023", "Nov 2023", "Dec 2023",
                                             "Jan 2024", "Feb 2024", "Mar 2024"))
 
@@ -390,7 +391,7 @@ plot4 <- ggplot(data = Realis, aes(x = `Sale Month`)) +
     scale_x_discrete(name ="Sale Month", 
                      limits = c("Jan 2023", "Feb 2023", "Mar 2023", 
                         "Apr 2023","May 2023","Jun 2023", 
-                        "Jul 2023", "Aug 2023", "Sep 2023",
+                        "Jul 2023", "Aug 2023", "Sept 2023",
                         "Oct 2023", "Nov 2023", "Dec 2023", 
                         "Jan 2024", "Feb 2024", "Mar 2024")) +
   
@@ -404,7 +405,7 @@ plot5 <- ggplot(data = Realis, aes(x = `Sale Month`, y = `Unit Price ($ PSM)`)) 
     scale_x_discrete(name ="Sale Month",
                    limits = c("Jan 2023", "Feb 2023", "Mar 2023",
                       "Apr 2023","May 2023","Jun 2023",
-                      "Jul 2023", "Aug 2023", "Sep 2023",
+                      "Jul 2023", "Aug 2023", "Sept 2023",
                       "Oct 2023", "Nov 2023", "Dec 2023",
                       "Jan 2024", "Feb 2024", "Mar 2024")) +
     
@@ -423,7 +424,7 @@ by_month <- Realis %>%
 by_month$`Sale Month` <- factor(by_month$`Sale Month`, 
                                 levels = c("Jan 2023", "Feb 2023", "Mar 2023",
                                             "Apr 2023","May 2023","Jun 2023",
-                                            "Jul 2023", "Aug 2023", "Sep 2023",
+                                            "Jul 2023", "Aug 2023", "Sept 2023",
                                             "Oct 2023", "Nov 2023", "Dec 2023",
                                             "Jan 2024", "Feb 2024", "Mar 2024"))
 
