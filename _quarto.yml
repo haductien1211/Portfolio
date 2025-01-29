@@ -7,7 +7,12 @@ website:
     left:
       - text: "R-Visual Analytics and Applications"
         menu: 
-          - text: "Hands-on Exercise 1.1"
+          - text: "Project 01"
+            href: "R-VAA/Project01/Project01.html"
+          - text: "Project 02"
+            href: "R-VAA/Project02/Project02.html" 
+          - text: "Project 03"
+            href: "R-VAA/Project03/Project03.html"  
       - text: "R-Geospatial Analytics and Applications"
         menu: 
           - text: "Project 01"

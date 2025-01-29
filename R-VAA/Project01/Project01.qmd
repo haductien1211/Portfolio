@@ -1,0 +1,480 @@
+---
+title: "Project 1"
+author: "Ha Duc Tien"
+date: "April 17, 2024"
+date-modified: "last-modified"
+execute: 
+  eval: true
+  echo: true
+  warning: false
+  freeze: true
+---
+
+# 1. Overview
+
+## 1.1 The task
+
+Assuming the role of a graphical editor of a median company, the purpose of this data visualization exercise is to prepare minimum two and maximum three data visualizations to reveal interesting insights on the private residential market and sub-markets of Singapore for the 1st quarter of 2024 and prior periods.
+
+## 1.2 The data
+
+For this exercise and to accomplish the task, transaction data of [REALIS](https://www.ura.gov.sg/reis/index) will be used, which provides comprehensive and up-to-date statistics on the property market in Singapore.
+
+A complete set of the private residential property transaction data from 1st January 2023 to 31st March 2024
+
+# 2. Loading the needed libraries and data preparation
+
+## 2.1 Loading the packages
+
+For this Take-home exercise 1, I am planning to use some of the libraries below:
+
+[tidyverse](https://www.tidyverse.org/packages/): The tidyverse is an opinionated collection of R packages designed for data science.
+
+[patchwork](https://patchwork.data-imaginist.com/): a package to make it simple to combine separate ggplots into the same graphic
+
+[ggrepel](https://ggrepel.slowkow.com/): a package to provide geoms for ggplot2 to repel overlapping text labels
+
+[ggthemes](https://ggplot2.tidyverse.org/reference/ggtheme.html): a package to provide some extra themes, geoms, and scales for ‘ggplot2’.
+
+[ggridges](https://wilkelab.org/ggridges/): a package for Ridgeline plots, which are partially overlapping line plots that create the impression of a mountain range.
+
+[ggdist](https://mjskay.github.io/ggdist/reference/ggdist-package.html): an R package that provides a flexible set of ggplot2 geoms and stats designed especially for visualizing distributions and uncertainty which will assist with ggridges package
+
+#### The Code:
+
+```{r}
+pacman::p_load(ggrepel, patchwork, 
+               ggthemes, hrbrthemes,
+               tidyverse, ggridges, ggdist)
+```
+
+## 2.2 Importing data and preparation
+
+Since the data is a list of csv files containing quarterly data from the first quarter of 2023 to the first quarter of 2024, for the purpose of the study I will be creating and using both the full data set (***Realis***) and a smaller data set containing only data for the first quarter of 2024 (***first_quarter_2024***) from ResidentialTransaction20240414220633.csv file
+
+#### The Code:
+
+```{r}
+first_quarter_2024 <- read_csv("data/ResidentialTransaction20240414220633.csv")
+
+list_of_files <- list.files(path = "data",
+                            recursive = TRUE,
+                            pattern = "\\.csv$",
+                            full.names = TRUE)
+Realis <- read_csv(list_of_files)
+
+```
+
+# 3. Data overview and data wrangling
+
+## 3.1 Data overview
+
+#### The Code:
+
+```{r}
+glimpse(Realis)
+summary(Realis)
+colSums(is.na(Realis))
+```
+
+A quick look at the data shown that there are 21 different columns, there are categorical variables that could be of interest such as `Project Name`, `Property Type`, `Planning Region`, `Planning Area` as well as continuous variables such as `Transacted Price ($)`, `Area (SQFT)`, `Area (SQM)`, `Unit Price ($ PSF)`, `Unit Price ($ PSM)`, `Number of Units`.
+
+There is also no missing data which is good and mean that we do not have to perform data wrangling for missing data.
+
+For the purpose of this study, I would be focusing on these variable below:
+
+`Property Type`, `Planning Region`, `Transacted Price ($)`, `Area (SQM)`, `Unit Price ($ PSM)`, `Sale Date`
+
+## 3.2 Data wrangling
+
+Interestingly, `Sale Date` is supposed to be a kind of continuous variable or discrete variable; however, it is in '*character*' type instead of '*datetime*' or rather it is just in '*string*', even though, the format seems correct. In addition, I also want to use a sort of monthly data visualization and the time seems to be in Date format.
+
+Therefore some data transformation would need to be performed to create 2 new column called `Sale Date asDate` which is properly in Datetime format, and `Sale Month`, which show the month Sale happened instead of date.
+
+To do this I would be using [parse_date_time](https://lubridate.tidyverse.org/reference/parse_date_time.html) part of the [lubridate](https://lubridate.tidyverse.org/index.html) in tidyverse package to correctly pasring the 'string' into datetime format then use [as.Date](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/as.Date) to finally turn it into proper 'datetime', this would also create the `Sale Date asDate` column.
+
+After above steps, I will be using [format](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/format) to create the `Sale Month` colum
+
+#### The Code:
+
+```{r}
+Realis <- Realis %>% 
+  mutate(`Sale Date asDate` = as.Date((parse_date_time(`Sale Date`, 
+        orders = c("%d %b %Y")))))
+Realis <- Realis %>% 
+  mutate(`Sale Month` = format(as.Date((parse_date_time(`Sale Date`, 
+        orders = c("%d %b %Y")))), "%b %Y"))
+
+
+
+first_quarter_2024 <- first_quarter_2024 %>% 
+  mutate(`Sale Date asDate` = as.Date((parse_date_time(`Sale Date`, 
+        orders = c("%d %b %Y")))))
+
+first_quarter_2024 <- first_quarter_2024 %>% 
+  mutate(`Sale Month` = format(as.Date((parse_date_time(`Sale Date`, 
+        orders = c("%d %b %Y")))), "%b %Y"))
+
+```
+
+# 4. Exploratory Data Analysis
+
+As mentioned in the date importing and preparation, for the purpose of this study, I have prepare 2 separate data set for the full period from 2023 to first quarter of 2024 and just first quarter of 2024 called `Realis` and `first_quarter_2024`
+
+The reason for this is I want to do Exploratory Data Analysis for both only the first quarter of 2024 data as well as an overall time series for the full data set which would be the 2 main data visualizations for the purpose of this study. There would be another sub data visualization which would be mentioned later
+
+## 4.1 Data visualization for the first quarter of 2024
+
+### 4.1.1 Main part
+
+This part of the first quarter of 2024 data visualization contain 3 plots:
+
+-   On the left is the bar plot counting the number of sales breaking down by different `Planning Region`
+
+-   On the right is a ridgeline plot showing the `Unit Price ($ PSM)` distribution breakdown by 4 quartiles by different `Planning Region`
+
+-   Bottom plot is box plot showing a further breakdown from the ridgeline plot going into different `Property Type`
+
+::: panel-tabset
+## The Plot
+
+```{r, fig.width = 32, fig.height = 24, dpi = 200}
+#| echo: false
+plot1 <-ggplot(data = first_quarter_2024, aes(x = `Planning Region`)) +
+    geom_bar(color = "grey10", aes(fill = `Property Type`)) +
+    ggtitle("Sales by Property Type by Planning Region") +
+    theme_economist() +
+    theme(axis.text=element_text(size = 20), 
+          axis.title = element_text(size = 25), 
+          title = element_text(size = 25, margin = margin(b = 15)), 
+          axis.title.y = element_text(margin = margin(r = 15)),
+          axis.title.x = element_text(margin = margin(t = 15)))
+
+plot2 <- ggplot(data = first_quarter_2024, aes(x = `Planning Region`, y = `Unit Price ($ PSM)`)) +
+    geom_boxplot(aes(color=`Property Type`)) + 
+    theme(axis.text=element_text(size=12)) +
+    ggtitle("Distribution of Unit Price ($ PSM) by Planning Region by Property Type")+
+    theme_economist() +
+    theme(axis.text=element_text(size = 20), 
+          axis.title = element_text(size = 25), 
+          title = element_text(size = 25, margin = margin(b = 15)), 
+          axis.title.y = element_text(margin = margin(r = 15)),
+          axis.title.x = element_text(margin = margin(t = 15)))
+
+plot3 <- ggplot(data = first_quarter_2024, 
+       aes(y = `Planning Region`, x = `Unit Price ($ PSM)`, 
+            fill = factor(after_stat(quantile)))) +
+  stat_density_ridges(
+    geom = "density_ridges_gradient",
+    calc_ecdf = TRUE, 
+    quantiles = 4,
+    quantile_lines = TRUE) +
+  scale_fill_viridis_d(name = "Quartiles") +
+  theme_economist()+
+  ggtitle("Distribution of Unit Price ($ PSM) by Planning Region")+
+  theme(axis.text=element_text(size = 20), 
+        axis.title = element_text(size = 25), 
+        title = element_text(size = 25, margin = margin(b = 15)), 
+        axis.title.y = element_text(margin = margin(r = 15)),
+        axis.title.x = element_text(margin = margin(t = 15)))
+
+(plot1 + plot3 ) / plot2
+```
+
+## The Code
+
+```{r, fig.width = 36, fig.height = 24, dpi = 200}
+#| eval: false
+plot1 <-ggplot(data = first_quarter_2024, aes(x = `Planning Region`)) +
+    geom_bar(color = "grey10", aes(fill = `Property Type`)) +
+    ggtitle("Sales by Property Type by Planning Region") +
+    theme_economist() +
+    theme(axis.text=element_text(size = 20), 
+          axis.title = element_text(size = 25), 
+          title = element_text(size = 25, margin = margin(b = 15)), 
+          axis.title.y = element_text(margin = margin(r = 15)),
+          axis.title.x = element_text(margin = margin(t = 15)))
+
+plot2 <- ggplot(data = first_quarter_2024, aes(x = `Planning Region`, y = `Unit Price ($ PSM)`)) +
+    geom_boxplot(aes(color=`Property Type`)) + 
+    theme(axis.text=element_text(size=12)) +
+    ggtitle("Distribution of Unit Price ($ PSM) by Planning Region by Property Type")+
+    theme_economist() +
+    theme(axis.text=element_text(size = 20), 
+          axis.title = element_text(size = 25), 
+          title = element_text(size = 25, margin = margin(b = 15)), 
+          axis.title.y = element_text(margin = margin(r = 15)),
+          axis.title.x = element_text(margin = margin(t = 15)))
+
+plot3 <- ggplot(data = first_quarter_2024, 
+       aes(y = `Planning Region`, x = `Unit Price ($ PSM)`, 
+            fill = factor(after_stat(quantile)))) +
+  stat_density_ridges(
+    geom = "density_ridges_gradient",
+    calc_ecdf = TRUE, 
+    quantiles = 4,
+    quantile_lines = TRUE) +
+  scale_fill_viridis_d(name = "Quartiles") +
+  theme_economist()+
+  ggtitle("Distribution of Unit Price ($ PSM) by Planning Region")+
+  theme(axis.text=element_text(size = 20), 
+        axis.title = element_text(size = 25), 
+        title = element_text(size = 25, margin = margin(b = 15)), 
+        axis.title.y = element_text(margin = margin(r = 15)),
+        axis.title.x = element_text(margin = margin(t = 15)))
+
+(plot1 + plot3 ) / plot2
+```
+:::
+
+::: callout-tip
+## Observations and insights
+
+From the data visualizations above, here are my observations and insights on date from first quarter 2024:
+
+-   The Central region seems to have the highest number of sales followed by the North East region with main Property Type being Apartment and Condominium. North Region has the lowest number of sales, but their main Property Type sale is Executive Condominium; similarly West Region main Property Type sale is also Executive Condominium
+
+-   The `Unit Price ($ PSM)` seems to be on average higher in the Central and North East region with some of the highest being in Central region
+
+-   Further breakdown of `Unit Price ($ PSM)` by Property Type show an interesting trend of Apartment being more expensive than other types in Central and North East region. Meanwhile, in North and West region where their main Property Type sale is Executive Condominium the `Unit Price ($ PSM`) is lowest.
+:::
+
+### 4.1.1 Sub part
+
+For this sub part, I am showing a scatterplot of `Area (SQM)` vs `Transacted Price ($)`, with a fit line using Generalized Linear Models, each data point is label under their `Planning Region` and different colors is for different `Property Type`.
+
+The purpose of this plot is to see if there is a relationship between property size and its price as well as to see which property type from which region is likely to be of bigger size and more expensive overall.
+
+However, since the proper size and its transacted price could be quite high (144883.4 SQM for size and 392,180,000 SGD for price), for this study, I have limited the data to be within 30 - 600 SQM for size and 450,000 - 10,000,000 SGD for transacted price
+
+::: panel-tabset
+## The Plot
+
+```{r, fig.width = 20, fig.height = 8, dpi = 200}
+#| echo: false
+ggplot(data = first_quarter_2024, aes(y = `Area (SQM)`,
+                                      x = `Transacted Price ($)`)) +
+  geom_point()+
+  geom_smooth(method = glm, linewidth = 1) +
+  coord_cartesian(ylim = c(30,600), xlim=c(450000,10000000)) +
+  geom_label_repel(aes(label = `Planning Region`, color = `Property Type`), 
+                   fontface = "bold", max.overlaps = 12) +
+  ggtitle("Size (SQM) vs Transacted Price ($) in the first quarter of 2024") +
+  theme_economist()+
+  theme(axis.text=element_text(size = 15), 
+        axis.title = element_text(size = 20), 
+        title = element_text(size = 20, margin = margin(b = 15)), 
+        axis.title.y = element_text(margin = margin(r = 15)),
+        axis.title.x = element_text(margin = margin(t = 15)))
+```
+
+## The Code
+
+```{r, fig.width = 20, fig.height = 8, dpi = 200}
+#| eval: false
+ggplot(data = first_quarter_2024, aes(y = `Area (SQM)`,
+                                      x = `Transacted Price ($)`)) +
+  geom_point()+
+  geom_smooth(method = glm, linewidth = 1) +
+  coord_cartesian(ylim = c(30,600), xlim=c(450000,10000000)) +
+  geom_label_repel(aes(label = `Planning Region`, color = `Property Type`), 
+                   fontface = "bold", max.overlaps = 12) +
+  ggtitle("Size (SQM) vs Transacted Price ($) in the first quarter of 2024") +
+  theme_economist()+
+  theme(axis.text=element_text(size = 15), 
+        axis.title = element_text(size = 20), 
+        title = element_text(size = 20, margin = margin(b = 15)), 
+        axis.title.y = element_text(margin = margin(r = 15)),
+        axis.title.x = element_text(margin = margin(t = 15)))
+```
+:::
+
+::: callout-tip
+## Observations and insights
+
+From the data visualizations above, here are my observations
+
+-   There seems to be a clear linear correlation between `Area (SQM)` and `Transacted Price ($)` based on the Generalized Linear Models fit line.
+-   Central region shows a high concentration of high value properties with some of the most expensive properties and these properties are mainly Condominium and Executive Condominium.
+-   Detached House seems to be generally larger than other types of property.
+:::
+
+## 4.2 Time series data visualization from 2023 to first quarter of 2024
+
+This part of the data visualization contain 3 plots:
+
+-   On the top is a bar plot, counting the number of monthly sales breaking down by different `Property Type`
+
+-   In the middle is a box plot showing the monthly distribution of `Unit Price ($ PSM)` by different `Property Type`
+
+-   Bottom plot is a line plot as further breakdown from the middle box plot, showing the movement of `Mean Unit Price ($ PSM)` by different `Property Type`
+
+::: panel-tabset
+## The Plot
+
+```{r, fig.width = 20, fig.height = 24, dpi = 200}
+#| echo: false
+plot4 <- ggplot(data = Realis, aes(x = `Sale Month`)) +
+    geom_bar(color = "grey10", aes(fill = `Property Type`)) +
+    scale_x_discrete(name ="Sale Month", 
+                     limits = c("Jan 2023", "Feb 2023", "Mar 2023", 
+                        "Apr 2023","May 2023","Jun 2023", 
+                        "Jul 2023", "Aug 2023", "Sep 2023",
+                        "Oct 2023", "Nov 2023", "Dec 2023", 
+                        "Jan 2024", "Feb 2024", "Mar 2024")) +
+  
+    ggtitle("Monthly number of sales by Property Type") +
+    theme_economist() +
+    theme(axis.text=element_text(size = 15), 
+          axis.title = element_text(size = 20), 
+          title = element_text(size = 20, margin = margin(b = 15)), 
+          axis.title.y = element_text(margin = margin(r = 15)),
+          axis.title.x = element_text(margin = margin(t = 15)))
+  
+
+plot5 <- ggplot(data = Realis, aes(x = `Sale Month`, y = `Unit Price ($ PSM)`)) +
+    scale_x_discrete(name ="Sale Month",
+                   limits = c("Jan 2023", "Feb 2023", "Mar 2023",
+                      "Apr 2023","May 2023","Jun 2023",
+                      "Jul 2023", "Aug 2023", "Sep 2023",
+                      "Oct 2023", "Nov 2023", "Dec 2023",
+                      "Jan 2024", "Feb 2024", "Mar 2024")) +
+    
+    geom_boxplot(aes(color=`Property Type`)) + 
+    theme(axis.text=element_text(size=12)) +
+    ggtitle("Monthly changes in Unit Price ($PSM)")+
+    theme_economist() +
+    theme(axis.text=element_text(size = 15), 
+          axis.title = element_text(size = 20), 
+          title = element_text(size = 20, margin = margin(b = 15)), 
+          axis.title.y = element_text(margin = margin(r = 15)),
+          axis.title.x = element_text(margin = margin(t = 15)))
+
+
+by_month <- Realis %>%
+  group_by(`Property Type`, `Sale Month`) %>%
+  summarise(`Mean Unit Price ($ PSM)` = mean(`Unit Price ($ PSM)`))
+
+by_month$`Sale Month` <- factor(by_month$`Sale Month`, 
+                                levels = c("Jan 2023", "Feb 2023", "Mar 2023",
+                                            "Apr 2023","May 2023","Jun 2023",
+                                            "Jul 2023", "Aug 2023", "Sep 2023",
+                                            "Oct 2023", "Nov 2023", "Dec 2023",
+                                            "Jan 2024", "Feb 2024", "Mar 2024"))
+
+by_month <- by_month[order(by_month$`Sale Month`),]
+
+
+plot6 <- ggplot(data = by_month, aes(x = `Sale Month`, y = `Mean Unit Price ($ PSM)`, 
+                            group = `Property Type`)) +
+    geom_path(aes(color = `Property Type`), size = 1) +
+    geom_point(size = 1.5) +
+    theme(axis.text=element_text(size=12))+
+    ggtitle("Monthly changes in Mean Unit Price ($PSM) 2023 to first quarter 2024")+
+    theme_economist() +
+    theme(axis.text=element_text(size = 15), 
+          axis.title = element_text(size = 20), 
+          title = element_text(size = 20, margin = margin(b = 15)), 
+          axis.title.y = element_text(margin = margin(r = 15)),
+          axis.title.x = element_text(margin = margin(t = 15)))
+
+(plot4 / plot5 / plot6)
+```
+
+## The Code
+
+```{r, fig.width = 20, fig.height = 24, dpi = 300}
+#| eval: false
+plot4 <- ggplot(data = Realis, aes(x = `Sale Month`)) +
+    geom_bar(color = "grey10", aes(fill = `Property Type`)) +
+    scale_x_discrete(name ="Sale Month", 
+                     limits = c("Jan 2023", "Feb 2023", "Mar 2023", 
+                        "Apr 2023","May 2023","Jun 2023", 
+                        "Jul 2023", "Aug 2023", "Sep 2023",
+                        "Oct 2023", "Nov 2023", "Dec 2023", 
+                        "Jan 2024", "Feb 2024", "Mar 2024")) +
+  
+    ggtitle("Monthly number of sales by Property Type") +
+    theme_economist() +
+    theme(axis.text=element_text(size = 15), 
+          axis.title = element_text(size = 18)
+          , title = element_text(size = 20), axis)
+
+plot5 <- ggplot(data = Realis, aes(x = `Sale Month`, y = `Unit Price ($ PSM)`)) +
+    scale_x_discrete(name ="Sale Month",
+                   limits = c("Jan 2023", "Feb 2023", "Mar 2023",
+                      "Apr 2023","May 2023","Jun 2023",
+                      "Jul 2023", "Aug 2023", "Sep 2023",
+                      "Oct 2023", "Nov 2023", "Dec 2023",
+                      "Jan 2024", "Feb 2024", "Mar 2024")) +
+    
+    geom_boxplot(aes(color=`Property Type`)) + 
+    theme(axis.text=element_text(size=12)) +
+    ggtitle("Monthly changes in Unit Price ($PSM)")+
+    theme_economist() +
+    theme(axis.text=element_text(size = 15), 
+          axis.title = element_text(size = 18)
+          , title = element_text(size = 20))
+
+by_month <- Realis %>%
+  group_by(`Property Type`, `Sale Month`) %>%
+  summarise(`Mean Unit Price ($ PSM)` = mean(`Unit Price ($ PSM)`))
+
+by_month$`Sale Month` <- factor(by_month$`Sale Month`, 
+                                levels = c("Jan 2023", "Feb 2023", "Mar 2023",
+                                            "Apr 2023","May 2023","Jun 2023",
+                                            "Jul 2023", "Aug 2023", "Sep 2023",
+                                            "Oct 2023", "Nov 2023", "Dec 2023",
+                                            "Jan 2024", "Feb 2024", "Mar 2024"))
+
+by_month <- by_month[order(by_month$`Sale Month`),]
+
+
+plot6 <- ggplot(data = by_month, aes(x = `Sale Month`, y = `Mean Unit Price ($ PSM)`, 
+                            group = `Property Type`)) +
+    geom_path(aes(color = `Property Type`), size = 1) +
+    geom_point(size = 1.5) +
+    theme(axis.text=element_text(size=12))+
+    ggtitle("Monthly changes in Mean Unit Price ($PSM) 2023 to first quarter 2024")+
+    theme_economist() +
+    theme(axis.text=element_text(size = 15), 
+        axis.title = element_text(size = 18)
+        , title = element_text(size = 20))
+
+(plot4 / plot5 / plot6)
+```
+:::
+
+::: callout-tip
+## Observations and insights
+
+From the data visualizations above, here are my observations:
+
+-   The main property types for sales from Jan 2023 to Mar 2024 seem to be Apartment and Condominium followed by Executive Condominium. The highest sales amount for this period occurred in July 2023
+
+-   The overall `Unit Price ($ PSM)` for different property type during the period seems stable except for Detached House which has a dip in July 2023 and Executive Condominium with overall downward trend and a dip in Jun 2023. For Apartment type, there seems to be an overall downward trend for `Mean Unit Price ($ PSM)` but seems to be picking up again
+
+-   Surprisingly, contrary to what being observed in the scatterplot where some of the most expensive properties are Executive Condominium, their overall `Mean Unit Price ($ PSM)` has been the lowest and quite stable, albeit there is a small increase starting 2024
+:::
+
+# 5. Summary and conclusion
+
+This study has showcase the power of data visualization and R ggplot2 packages. From the plotted graphs here are the summary of the key findings:
+
+-   Different Planning Region varied in their total property sales and main property types
+-   The `Unit Price ($ PSM)` seems to be on average higher with some of the highest being in Central region, this trend is also true for `Transacted Price ($)`
+-   There seems to be a clear linear correlation between `Area (SQM)` and `Transacted Price ($)` based on the Generalized Linear Models fit line
+-   Main property types for sales from Jan 2023 to Mar 2024 seem to be Apartment and Condominium followed by Executive Condominium
+-   Executive Condominium, their overall `Mean Unit Price ($ PSM)` has been the lowest and quite stable. For Apartment, there seems to be an overall downward trend in `Mean Unit Price ($ PSM)` but seems to be picking up again
+
+In conclusion, the above visualization has hopefully revealed more information on the private residential market and sub-markets of Singapore for better decision making.
+
+# 6. Reference
+
+-   <https://r4va.netlify.app/>
+
+-   <https://www.ura.gov.sg/reis/dataDictionary>
+
+-   <https://isss608-ay2023-24apr.netlify.app/lesson/lesson02/lesson02-designing%20graphs%20to%20enlighten#/title-slide>
+
+-   <https://www.channelnewsasia.com/singapore/hdb-resale-private-home-prices-rise-waiting-period-property-analysts-4233876>

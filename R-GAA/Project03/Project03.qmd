@@ -12,7 +12,7 @@ execute:
 
 # 1. Objectives and Tasks and packages used
 
-In this take-home exercise, I am required to calibrate a predictive model to predict HDB resale prices between July-September 2024 by using HDB resale transaction records in 2023. For the purpose of this take-home exercise, HDB Resale Flat Prices provided by Data.gov.sg should be used as the core data set. The study should focus on either three-room, four-room or five-room flat.
+In this project, I planned to calibrate a predictive model to predict HDB resale prices between July-September 2024 by using HDB resale transaction records in 2023. For the purpose of this take-home exercise, HDB Resale Flat Prices provided by Data.gov.sg should be used as the core data set. The study should focus on either three-room, four-room or five-room flat.
 
 https://isss626-ay2024-25aug.netlify.app/take-home_ex03b 
 
