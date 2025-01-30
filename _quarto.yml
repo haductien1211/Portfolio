@@ -31,9 +31,9 @@ website:
             href: "R-GAA/Project02/Project02.html" 
           - text: "Project 03"
             href: "R-GAA/Project03/Project03.html" 
-      - text: "Python"
-        menu: 
-          - text: "Project 1"               
+      # - text: "Python"
+      #   menu: 
+      #     - text: "Project 1"               
     right: 
       - href: index.qmd
         text: Home
