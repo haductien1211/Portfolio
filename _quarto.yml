@@ -19,6 +19,10 @@ website:
             href: "R-Shiny/Proposal/Proposal.html"
           - text: "Prototype"
             href: "R-Shiny/Prototype/Prototype.html" 
+          - text: "Shiny App"
+            href: "https://haductien1211.shinyapps.io/MC3ShinyAppDemo/"
+          - text: "User Guide"
+            href: "User Guide/User_guide.html"
       - text: "R-Geospatial Analytics"
         menu: 
           - text: "Project 01"

@@ -1,0 +1,13 @@
+---
+title: "User Guide"
+author: Ha Duc Tien
+date: "June 25, 2024"
+date-modified: "last-modified"
+execute: 
+  eval: true
+  echo: true
+  warning: false
+  freeze: true
+---
+
+![](User Guide.pdf){height=1080 width=1080}
