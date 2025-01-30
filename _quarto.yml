@@ -5,7 +5,7 @@ website:
   title: "Porfolio"
   navbar:
     left:
-      - text: "R-Visual Analytics and Applications"
+      - text: "R-Visual Analytics"
         menu: 
           - text: "Project 01"
             href: "R-VAA/Project01/Project01.html"
@@ -13,7 +13,13 @@ website:
             href: "R-VAA/Project02/Project02.html" 
           - text: "Project 03"
             href: "R-VAA/Project03/Project03.html"
-      - text: "R-Geospatial Analytics and Applications"
+      - text: "R-Shiny Project"
+        menu: 
+          - text: "Proposal"
+            href: "R-Shiny/Proposal/Proposal.html"
+          - text: "Prototype"
+            href: "R-Shiny/Prototype/Prototype.html" 
+      - text: "R-Geospatial Analytics"
         menu: 
           - text: "Project 01"
             href: "R-GAA/Project01/Project01.html" 

@@ -1,0 +1,1376 @@
+---
+title: "Prototype"
+author: Ha Duc Tien
+date: "June 25, 2024"
+date-modified: "last-modified"
+execute: 
+  eval: true
+  echo: true
+  warning: false
+  freeze: true
+  code-fold: true
+  code-summary: "Show the code"
+---
+
+# I. The Data
+
+The data used for this part would be the **mc3.json** file download from the VAST MC3 website
+
+# II. R Packages and the data import
+
+## 1. Loading and launching of R Packages
+
+Below is a list of R Packages we are planning to use for this portion and for exploration
+
+-   *plotly* for creating interactive web-based graphs via the open source JavaScript.
+-   *DT* provides an R interface to the JavaScript library DataTables that create interactive table on html page.
+-   *jsonlite* JSON parser and generator optimized for statistical data and the web.
+-   *igraph* for creating and manipulating graphs and analyzing networks.
+-   *tidygraph* provides a tidy framework for all things relational (networks/graphs, trees, etc.)
+-   *ggraph* an extension of the ggplot2 API tailored to graph visualizations and provides the same flexible approach to building up plots layer by layer.
+-   *visNetwork* for network visualization.
+-   *ggforce* collection of mainly new stats and geoms for composing specialised plots
+-   *skimr* provides summary statistics about variables in data frames, tibbles, data tables and vectors.
+-   *tidyverse* an opinionated collection of R packages designed for data science.
+-   *ggforce* collection of new stats and geoms for composing specialized plots.
+-   *skimr* provides summary statistics about variables in data frames, tibbles, data tables, and vectors.
+-   *dendextend* extends the functionality of hierarchical clustering dendrogram objects in R.
+-   *dplyr* provides a grammar of data manipulation for transforming data frames.
+-   *lubridate* helps with the manipulation of dates and times in R.
+-   *ggdendro* extends ggplot2 for creating dendrograms.
+-   *ape* provides functions for reading, writing, and manipulating phylogenetic trees and DNA sequences.
+
+```{r}
+pacman::p_load(plotly, DT, jsonlite, igraph, tidygraph, ggraph, visNetwork, ggforce, skimr, tidyverse, dendextend, dplyr, lubridate, ggdendro, ape)
+
+```
+
+
+
+## 2. Importing the data
+
+Import the data from *mc3.json* file using the `fromJSON()` function
+
+```{r}
+mc3_data <- fromJSON("data/mc3.json")
+```
+
+# III. The Data
+
+## 1. Quick look at the mc3 data
+
+```{r}
+glimpse(mc3_data)
+```
+
+The main data in this *mc3.json* file includes 2 data frame `nodes` and `links`, hence we will further breakdown and review the data in these 2 data frames.
+
+## 2. Dataframe nodes
+
+First we import this nodes data using `as_tibble()` function and have a quick `glimpse()` at the data itself, let call this data `mc3_nodes_raw`
+
+Nodes
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+mc3_nodes_raw <- as_tibble(mc3_data$nodes) %>%
+  distinct()
+
+glimpse(mc3_nodes_raw)
+```
+
+`mc3_nodes_raw` have 15 columns but many of them seems to be of no use from a data analysis perspective of this portion such as `TradeDescription`, `_last_edited_by`, `_last_edited_date`, `_date_added`, `_raw_source`, `_algorithm`, `dob`. In addition, some data column seems to be in the wrong format such as `founding_date` which supposed to be in **datetime** instead of **character**
+
+Therefore, we will select from the raw file, columns that we think maybe of use for the data analysis and fix the issue with wrong data format using the code below and call the new data `mc3_nodes`,we also rename the `type` to `nodes_type` instead since both the `nodes` and `links` dataframes seems to have `type` as one of the column
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+mc3_nodes <- mc3_nodes_raw %>%
+  mutate(founding_date = as.Date(founding_date),
+         country = as.character(country),
+         id = as.character(id),
+         ProductServices = as.character(ProductServices),
+         revenue = as.numeric(as.character(revenue)),
+         type = as.character(type),
+         HeadOfOrg = as.character(HeadOfOrg),
+         PointOfContact = as.character(PointOfContact)) %>%
+  select(id, 
+         founding_date, 
+         country, 
+         type, 
+         revenue, 
+         ProductServices, 
+         HeadOfOrg,
+         PointOfContact) %>%
+  rename(nodes_type = type)
+
+glimpse(mc3_nodes)
+```
+
+The `founding_date` is now in the correct format
+
+## 3. Dataframe links
+
+First we import this nodes data using `as_tibble()` function and have a quick `glimpse()` at the data itself, let call this data `mc3_edges_raw`
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+mc3_edges_raw <- as_tibble(mc3_data$links) %>%
+  distinct()
+
+glimpse(mc3_edges_raw)
+```
+
+`mc3_edges_raw` is also having the same prolem as `mc3_nodes_raw` of having 1 columns but many of them seems to be of no use from a data analysis perspective of this portion such as `_last_edited_by`, `_last_edited_date`, `_date_added`, `_raw_source`, `_algorithm`, `key`. In addition, some data column seems to be in the wrong format such as `start_date` and `end_date` which supposed to be in **datetime** instead of **character**
+
+Therefore, we will select from the raw file, columns that we think maybe of use for the data analysis and fix the issue with wrong data format using the code below and call the new data mc3_edges
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+mc3_edges <- mc3_edges_raw %>%
+  select(source, 
+         target, 
+         type, 
+         start_date, 
+         end_date) %>%
+  mutate(source = as.character(source),
+         target = as.character(target),
+         type = as.character(type),
+         start_date = as.Date(start_date),
+         end_date = as.Date(end_date)) 
+
+glimpse(mc3_edges)
+```
+
+The `start_date` and `end_date` are now in the correct format
+
+# IV. Task 1 & 2
+
+## 1. Number of Organization over the year.
+
+For this Analysis and visualization we want to create a time series line graph of how many organization were founded each year over the years, to find if there any trend or suspicious changes in number of Organization over the years.
+
+Let us look at the different type that the `mc3_nodes` data have
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+unique(mc3_nodes$nodes_type)
+```
+
+There seems to be multiple type including `Organization` and `Person`, for the purpose of this analysis, we will be focusing on `Organization`. Therefore, we will filter the data to `Organization`. In addition, since the duration of `founding_date` is between 1945 to 2035 (70 years of data), we will create another column called `founding_year` to breakdown the date to year instead
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+mc3_nodes_Organization <- mc3_nodes %>%
+  mutate(founding_year = format(founding_date, format="%Y")) %>%
+  filter(str_like(nodes_type, "%Entity.Organization%"))
+glimpse(mc3_nodes_Organization)
+```
+
+Next we would want to count the number of company founded per year using the code below under `Organization_historical_year`
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+Organization_historical_year <- mc3_nodes_Organization %>%
+  group_by(`founding_year`, `nodes_type`) %>%
+  summarise(count = n())
+
+```
+
+Next we will `pivot_wider()` the data so each different Organization counts would be in its own columns, this is for the purpose of plotting the graph later since we want to show them in the same plot as well as being able to select the specific Organization viewers want to choose. In addition, since we want to have a data table later showing the raw data we will also renaming the column to a more user friendly name and then sort the full table starting with the earliest year. This would create `Organization_historical_year_select`
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+Organization_historical_year_select <- Organization_historical_year %>%
+  select(founding_year, nodes_type, count) %>%
+  pivot_wider(names_from = nodes_type, values_from = count) %>%
+  rename(`Founding Year` = founding_year,
+         `Company` = Entity.Organization.Company,
+         `Fishing Company` = Entity.Organization.FishingCompany,
+         `Logistics Company` = Entity.Organization.LogisticsCompany,
+         `Financial Company` = Entity.Organization.FinancialCompany,
+         `News Company` = Entity.Organization.NewsCompany,
+         `NGO` = Entity.Organization.NGO)
+
+Organization_historical_year_select <- 
+  Organization_historical_year_select[
+    order(Organization_historical_year_select$`Founding Year`),]
+
+```
+
+With that done, we would showcase final data table and plot the interactive time series graph with a time slider
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+datatable(Organization_historical_year_select, 
+              filter = 'top', 
+              options = list(pageLength = 10, 
+                             autoWidth = TRUE))
+
+plot_ly(as.data.frame(Organization_historical_year_select),
+          x = ~`Founding Year`,
+          y = ~`Company`,
+          name = "Company",
+          type = 'scatter',
+          mode = 'lines+markers',
+          text = ~paste("Year: ", `Founding Year`, 
+                        "<br>Founded: ", Company),
+          hoverinfo = 'text') %>%
+  add_trace(y = ~`Fishing Company`, 
+            name = 'Fishing Company', 
+            mode = 'lines+markers',
+            text = ~paste("Year: ", `Founding Year`,
+                          "<br>Founded: ", `Fishing Company`),
+            hoverinfo = 'text') %>%
+  add_trace(y = ~`Logistics Company`, 
+            name = 'Logistics Company', 
+            mode = 'lines+markers',
+            text = ~paste("Year: ", `Founding Year`,
+                          "<br>Founded: ", `Logistics Company`),
+            hoverinfo = 'text') %>%
+  add_trace(y = ~`Financial Company`, 
+            name = 'Financial Company', 
+            mode = 'lines+markers',
+            text = ~paste("Year: ", `Founding Year`,
+                          "<br>Founded: ", `Financial Company`),
+            hoverinfo = 'text') %>%
+  add_trace(y = ~`News Company`, 
+            name = 'News Company', 
+            mode = 'lines+markers',
+            text = ~paste("Year: ", `Founding Year`,
+                          "<br>Founded: ", `News Company`),
+            hoverinfo = 'text') %>%
+  add_trace(y = ~`NGO`, 
+            name = 'NGO', 
+            mode = 'lines+markers',
+            text = ~paste("Year: ", `Founding Year`,
+                          "<br>Founded: ", `NGO`),
+            hoverinfo = 'text') %>%
+  layout(legend = list(orientation = 'h'),
+         xaxis = list(title = "Founding Year", 
+                      rangeslider = list(visible = TRUE, 
+                                         thickness = 0.03)),
+         yaxis = list(title = "Count"))
+
+```
+
+::: callout-tip
+## Observation
+
+There seems to be a spike of number of Company founded between 2034 and 2035, the number of Fishing Company has a spike in 2031 but has been since on a steady decline ever since.
+:::
+
+## 2. Beneficial Ownership data analysis and Visualization
+
+Let looks at the different of relationship type that the `mc3_edges` table has
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+unique(mc3_edges$type)
+```
+
+There seems to be 4 type of relationship, for this part we would be focusing more on the Beneficial Ownership relationship. First thing first, as previously seen there seems to be 2 columns that represent the entity relation either `source` or `target`. We are curious to see what are the type of the entity for each of these source and target hence we would use the `mc3_nodes` to join with `mc3_edges` table to find out the nature of these `source` or `target`
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+nodes_type <- mc3_nodes %>%
+  select(id, nodes_type)
+
+mc3_edges <- mc3_edges %>%
+  left_join(nodes_type, by = c("source" = "id")) %>%
+  rename(nodes_type_source = nodes_type) %>%
+  left_join(nodes_type, by = c("target" = "id")) %>%
+  rename(nodes_type_target = nodes_type)
+
+```
+
+Let us check the data generated
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+mc3_edges %>%
+  filter(type == "Event.Owns.BeneficialOwnership") %>%
+  head()
+```
+
+Interestingly, it seems like `source` are the entity that has the `type` relationship with the `target`, on the Beneficial Ownership context, `source` are the owners (specifically person or individual) and `target` is the one being owned (specifically Organization).
+
+With the understanding above we want to find out want to know how many in total a `source` own a `target` and how many `source` (owners) a `target` have over the year. Let us start with the first part
+
+### How many in total a `source` own a `target` over the year
+
+For this part we will first filter the data to `Event.Owns.BeneficialOwnership` then do a `group_by()` of `start_date` and `source` then count the number of row creating `BO_indv_count`. Afteward, we will `group_by()` again using `source` and sum the `BO_indv_count` creating the cummulative column `BO_indv_total`
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+edges_BO_indv_count <- mc3_edges %>%
+  filter(type == "Event.Owns.BeneficialOwnership") %>%
+  group_by(start_date, source) %>%  
+  summarise(BO_indv_count = n())%>%
+  group_by(source) %>%
+  mutate(BO_indv_total = cumsum(BO_indv_count)) %>%
+  ungroup()
+
+```
+
+Let see how many unique `source` there is in the table
+
+```{r}
+n_distinct(edges_BO_indv_count$source)
+```
+
+16231 is quite a large number, hence we will reduce this number by create a list of Owner that own 10 or more `target` using the code below
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+Owner_list <- 
+  edges_BO_indv_count[
+    order(edges_BO_indv_count$BO_indv_total,
+          decreasing = T),] %>%
+  filter(BO_indv_total>=10) %>%
+  select(source) %>%
+  distinct()
+```
+
+What left now is to plot the graph showing the Individual total Beneficial Ownership over time
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+BO_indv_count_table <- edges_BO_indv_count %>%
+  rename(`Start Date` = start_date,
+         `Individual` = source,
+         `Ownership at curent date` = BO_indv_count,
+         `Total Ownership at curent date` = BO_indv_total)
+  
+datatable(BO_indv_count_table, 
+              filter = 'top', 
+              options = list(pageLength = 10, 
+                             autoWidth = TRUE))
+
+fig <- edges_BO_indv_count %>%
+  select(start_date, source, BO_indv_total) %>%
+  filter(source %in% Owner_list$source)%>%
+  plot_ly(x = ~start_date,
+          y = ~BO_indv_total,
+          type = 'scatter',
+          mode = 'lines+markers',
+          text = ~paste("Day: ", start_date, 
+                        "<br>Own: ", BO_indv_total),
+          hoverinfo = 'text',
+          fill = 'tozeroy',
+          transforms = list(
+            list(
+              type = 'filter',
+              target = ~source,
+              operation = '=',
+              value = unique(Owner_list$source)[1]))) %>%
+  layout(title = 'Individual total Beneficial Ownership over time',
+         xaxis = list(title = "Time",
+                      rangeslider = list(visible = TRUE,
+                                         thickness = 0.03)),
+         yaxis = list(title = "Count"),
+         updatemenus = list(
+           list(type = 'dropdown',
+                active = 0,
+                buttons = list(
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[1]),
+                       label = unique(Owner_list$source)[1]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[2]),
+                       label = unique(Owner_list$source)[2]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[3]),
+                       label = unique(Owner_list$source)[3]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[4]),
+                       label = unique(Owner_list$source)[4]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[5]),
+                       label = unique(Owner_list$source)[5]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[6]),
+                       label = unique(Owner_list$source)[6]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[7]),
+                       label = unique(Owner_list$source)[7]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[8]),
+                       label = unique(Owner_list$source)[8]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[9]),
+                       label = unique(Owner_list$source)[9]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[10]),
+                       label = unique(Owner_list$source)[10]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[11]),
+                       label = unique(Owner_list$source)[11]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[12]),
+                       label = unique(Owner_list$source)[12]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[13]),
+                       label = unique(Owner_list$source)[13]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[14]),
+                       label = unique(Owner_list$source)[14]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[15]),
+                       label = unique(Owner_list$source)[15]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[16]),
+                       label = unique(Owner_list$source)[16]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[17]),
+                       label = unique(Owner_list$source)[17]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[18]),
+                       label = unique(Owner_list$source)[18]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[19]),
+                       label = unique(Owner_list$source)[19]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[20]),
+                       label = unique(Owner_list$source)[20]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[21]),
+                       label = unique(Owner_list$source)[21]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[22]),
+                       label = unique(Owner_list$source)[22]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[23]),
+                       label = unique(Owner_list$source)[23]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[24]),
+                       label = unique(Owner_list$source)[24]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[25]),
+                       label = unique(Owner_list$source)[25]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[26]),
+                       label = unique(Owner_list$source)[26]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[27]),
+                       label = unique(Owner_list$source)[27]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[28]),
+                       label = unique(Owner_list$source)[28]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[29]),
+                       label = unique(Owner_list$source)[29]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[30]),
+                       label = unique(Owner_list$source)[30]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[31]),
+                       label = unique(Owner_list$source)[31]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[32]),
+                       label = unique(Owner_list$source)[32]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[33]),
+                       label = unique(Owner_list$source)[33]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[34]),
+                       label = unique(Owner_list$source)[34]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[35]),
+                       label = unique(Owner_list$source)[35]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[36]),
+                       label = unique(Owner_list$source)[36]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Owner_list$source)[37]),
+                       label = unique(Owner_list$source)[37])
+                  )
+                )
+              )
+            )
+
+fig
+```
+
+::: callout-tip
+## Observation
+
+There seems to be a few individual of interest such as Zachary Taylor or Breanna Price who suddenly start owning a significant amount of entities between 2033 and 2034 but then slow down their activities in 2035
+:::
+
+### How many in total `target` owned by `source` over the year
+
+Same as before we will go through the data creation steps
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+BO_owners_count <- mc3_edges %>%
+  filter(type == "Event.Owns.BeneficialOwnership") %>%
+  group_by(start_date, target) %>%  
+  summarise(BeneficialOwnership_count = n())%>%
+  group_by(target) %>%
+  mutate(BeneficialOwnership_total = cumsum(BeneficialOwnership_count)) %>%
+  ungroup()
+
+```
+
+Company that has 35 or more `source` using the code below
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+Company_list <- 
+  BO_owners_count[
+    order(BO_owners_count$BeneficialOwnership_total,
+          decreasing = T),] %>%
+  filter(BeneficialOwnership_total>=35) %>%
+  select(target) %>%
+  distinct()
+
+```
+
+And finally plotting
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+BO_owners_count_table <- BO_owners_count %>%
+  rename(`Start Date` = start_date,
+         `Organization` = target,
+         `New owners at curent date` = BeneficialOwnership_count,
+         `Total owners at curent date` = BeneficialOwnership_total)
+  
+datatable(BO_owners_count_table, 
+              filter = 'top', 
+              options = list(pageLength = 10, 
+                             autoWidth = TRUE))
+
+fig1 <- BO_owners_count %>%
+  select(start_date, target, BeneficialOwnership_total) %>%
+  filter(target %in% Company_list$target)%>%
+  plot_ly(x = ~start_date,
+          y = ~BeneficialOwnership_total,
+          type = 'scatter',
+          mode = 'lines+markers',
+          text = ~paste("Day: ", start_date, 
+                        "<br>Owner: ", BeneficialOwnership_total),
+          hoverinfo = 'text',
+          fill = 'tozeroy',
+          transforms = list(
+            list(
+              type = 'filter',
+              target = ~target,
+              operation = '=',
+              value = unique(Company_list$target)[1]))) %>%
+  layout(title = 'Company total number of Beneficial Owners over time',
+         xaxis = list(title = "Time",
+                      rangeslider = list(visible = TRUE,
+                                         thickness = 0.03)),
+         yaxis = list(title = "Count"),
+         updatemenus = list(
+           list(type = 'dropdown',
+                active = 0,
+                buttons = list(
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[1]),
+                       label = unique(Company_list$target)[1]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[2]),
+                       label = unique(Company_list$target)[2]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[3]),
+                       label = unique(Company_list$target)[3]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[4]),
+                       label = unique(Company_list$target)[4]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[5]),
+                       label = unique(Company_list$target)[5]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[6]),
+                       label = unique(Company_list$target)[6]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[7]),
+                       label = unique(Company_list$target)[7]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[8]),
+                       label = unique(Company_list$target)[8]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[9]),
+                       label = unique(Company_list$target)[9]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[10]),
+                       label = unique(Company_list$target)[10]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[11]),
+                       label = unique(Company_list$target)[11]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[12]),
+                       label = unique(Company_list$target)[12]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[13]),
+                       label = unique(Company_list$target)[13]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[14]),
+                       label = unique(Company_list$target)[14]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[15]),
+                       label = unique(Company_list$target)[15]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[16]),
+                       label = unique(Company_list$target)[16]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[17]),
+                       label = unique(Company_list$target)[17]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[18]),
+                       label = unique(Company_list$target)[18]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[19]),
+                       label = unique(Company_list$target)[19]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[20]),
+                       label = unique(Company_list$target)[20]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[21]),
+                       label = unique(Company_list$target)[21]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[22]),
+                       label = unique(Company_list$target)[22]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[23]),
+                       label = unique(Company_list$target)[23]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[24]),
+                       label = unique(Company_list$target)[24]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[25]),
+                       label = unique(Company_list$target)[25]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[26]),
+                       label = unique(Company_list$target)[26]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[27]),
+                       label = unique(Company_list$target)[27]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[28]),
+                       label = unique(Company_list$target)[28]),
+                  list(method = "restyle",
+                       args = list("transforms[0].value",
+                                   unique(Company_list$target)[29]),
+                       label = unique(Company_list$target)[29])
+                  )
+                )
+              )
+            )
+fig1
+```
+
+::: callout-tip
+## Observation
+
+There seems to be a few company of interest such as Downs Group who suddenly start having their business under owner ship at a significant rate between 2034 and 2035
+:::
+
+## 3. Final Observation for task 1 & 2
+
+To summarize the observations above
+
+::: callout-tip
+## Observation
+
+-   The rate of company founded seems to be stable mostly throughout the year from 1945 to 2025. However, there seems to be a spike of number of Company founded between 2034 and 2035, the number of Fishing Company has a spike in 2031 but has been since on a steady decline ever since.
+-   There is around 37 individuals who has Beneficial Ownership in at least 10 companies, the maximum of which is 92. Ouf of these individual there seems to be a few individuals of interest such as **Zachary Taylor** or **Breanna Price** who suddenly start owning a significant number of entities between 2033 and 2034 but then slow down their activities in 2035
+-   There is around 29 Companies who were own by more than 35 individuals, the maximum of which is 119. There seems to be a few companies of interest such as **Downs Group** who suddenly start having their business under owner ship at a significant rate between 2034 and 2035
+-   The motivation for the increase in activity is not clearly shown in the above visualization but it does show examples of typical and atypical business transactions. A complete version of the Shiny App would hopefully shed some light on this.
+:::
+
+# V. Task 3
+
+We consider doing this part to show individual company but in the think that being able to show a very big network would be beneficial in showcasing how much influence that specific network may have on the market as a whole hence we decide to plot a network with the idea of some filter to help with rendering
+
+For this part since `visNetwork` package could only intepret node ID as number instead of label there is a few data transformation steps that need to be taken. Firstly is to create a new id column using the row number as unique identifier for the nodes.
+
+This would be created udner the `mc3_nodes_id` data
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+mc3_nodes_id <- mc3_nodes %>%
+  rename(label = id) %>%
+  mutate(id = row_number()) %>%
+  select(id, label, nodes_type)
+
+glimpse(mc3_nodes_id)
+unique(mc3_nodes_id$nodes_type)
+```
+
+Next since we want to see what type of relationship between the 2 nodes from an edges are, the next step is to join the node and edges data to see the source node types and the target nodes type
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+nodes_type_id <- mc3_nodes_id %>%
+  select(id, label)
+
+mc3_edges_id <- mc3_edges %>%
+  left_join(nodes_type_id, by = c("source" = "label")) %>%
+  rename(from = id) %>%
+  left_join(nodes_type_id, by = c("target" = "label")) %>%
+  rename(to = id) %>%
+  select(from, to, source, target, nodes_type_source, nodes_type_target,type, start_date)
+
+mc3_edges_id$width <- with(mc3_edges_id, 
+                           ifelse(str_detect(type, 'Event.Owns.BeneficialOwnership'),
+                                  '0.9',
+                                  ifelse(str_detect(type, 'Event.Owns.Shareholdership'),
+                                         '0.1','0.01')))
+mc3_edges_id$label <- with(mc3_edges_id, 
+                           ifelse(str_detect(type, 'Event.Owns.BeneficialOwnership'),
+                                  'BO',
+                                  ifelse(str_detect(type, 'Event.Owns.Shareholdership'),
+                                         'SH',
+                                         ifelse(str_detect(type, 'Event.WorksFor'),
+                                         'WF', 'F'))))
+mc3_edges_id$font.color <- with(mc3_edges_id, 
+                           ifelse(str_detect(type, 'Event.Owns.BeneficialOwnership'),
+                                  'red',
+                                  ifelse(str_detect(type, 'Event.Owns.Shareholdership'),
+                                         'blue',
+                                         ifelse(str_detect(type, 'Event.WorksFor'),
+                                         'lightblue', 'yellow'))))
+  
+```
+
+The next step is to test whether we could limit the number of `relationship` a nodes may have for redendering purpose as well as whether the `date` could be adjust so we could perform a temporal transformation of the graph. The first step is to use 2 filter type. The up-to date meaning the data consider is up to this date and the min relationship a company has to have to be included in the graph plotting
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+filter_date ='2036-01-01'
+relationship = 48
+
+```
+
+with the date and relationship set, next is to do a relationship count and then create a list of company (nodes) to be considered with the above filter
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+relationship_count <- mc3_edges %>%
+  filter(type %in% c("Event.Owns.BeneficialOwnership",
+                     "Event.Owns.Shareholdership",
+                     "Event.WorksFor",
+                     "Relationship.FamilyRelationship")) %>%
+  filter(start_date <= filter_date) %>%
+  group_by(start_date, target) %>%
+  summarise(count = n())%>%
+  group_by(target) %>%
+  mutate(total = cumsum(count)) %>%
+  ungroup()
+
+
+Company_list <- 
+  relationship_count[
+    order(relationship_count$total,
+          decreasing = T),] %>%
+  filter(total>=relationship) %>%
+  select(target) %>%
+  distinct()
+
+```
+
+With the list of company decided, the next few steps is to put the data into proper grouping and create final group of nodes and edges by consider all the relationships associated with the list of company above
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+edges <- mc3_edges_id %>%
+  filter(start_date <= filter_date) %>%
+  filter(target %in% Company_list$target)
+
+nodes <- mc3_nodes_id %>%
+  filter(id %in% edges$from | 
+           id %in% edges$from | 
+           label %in% Company_list$target)
+
+nodes$group <- with(nodes,
+                    ifelse(str_detect(nodes_type, 'Entity.Organization.Company'),
+                                  'Company',
+                           ifelse(str_detect(nodes_type,
+                                             'Entity.Organization.LogisticsCompany'),
+                                  'Logistics Company',
+                                  ifelse(str_detect(nodes_type,
+                                                    'Entity.Organization.FishingCompany'),
+                                         'Fishing Company', 
+                                         ifelse(str_detect(nodes_type,
+                                                    'Entity.Organization.FinancialCompany'),
+                                                'Financial Company',
+                                                ifelse(str_detect(nodes_type,
+                                                    'Entity.Organization.NewsCompany'),
+                                                    'News Company',
+                                                    ifelse(str_detect(nodes_type,
+                                                                      'Entity.Organization.NGO'),
+                                                           'NGO',
+                                                           ifelse(str_detect(nodes_type,
+                                                                             'Entity.Person.CEO'),
+                                                                  'CEO', 
+                                                                  ifelse(str_detect(nodes_type,
+                                                                                    'Entity.Person'),
+                                                                         'Person','Person')
+                                                                  )
+                                                           )
+                                                    )
+                                                )
+                                         )
+                                  )
+                           )
+                    )
+                                         
+                                         
+                                       
+glimpse(edges)
+glimpse(nodes)
+```
+
+
+This part is a test to see if we could create a list to show in the graph showing the name of all the company that we have in the current list. The idea for the later part is to have this selectable and highting the selected nodes connected to the selected entity
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+nodes <- transform(nodes,
+                   `Company` = ifelse(
+                     nodes_type %in% c("Entity.Organization.Company",
+                                       "Entity.Organization.LogisticsCompany",
+                                       "Entity.Organization.FishingCompany",
+                                       "Entity.Organization.FinancialCompany",
+                                       "Entity.Organization.NewsCompany",
+                                       "Entity.Organization.NGO"),
+                     label, ""))
+```
+
+
+Lastly is to plot the visNetwork
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+visNetwork(nodes, edges) %>%
+  visLayout(randomSeed = 1234) %>%
+  addFontAwesome()%>%
+  visNodes(size = 5) %>%
+  visEdges(selectionWidth = 0.1) %>%
+  visIgraphLayout(layout = "layout_with_fr") %>%
+  visGroups(groupname =  "Company",
+            shape = "icon",
+            icon = list(code = "f1ad",
+                        color = "#ff0000")) %>%
+  visGroups(groupname =  "Logistics Company",
+            shape = "icon",
+            icon = list(code = "f1ad",
+                        color = "#00ff40")) %>%
+  visGroups(groupname =  "Fishing Company",
+            shape = "icon",
+            icon = list(code = "f1ad",
+                        color = "#FFD43B")) %>%
+  visGroups(groupname =  "Financial Company",
+            shape = "icon",
+            icon = list(code = "f1ad",
+                        color = "#ff006f")) %>%
+  visGroups(groupname =  "News Company",
+            shape = "icon",
+            icon = list(code = "f1ad",
+                        color = "#0c0d0d")) %>%
+  visGroups(groupname =  "NGO",
+            shape = "icon",
+            icon = list(code = "f1ad",
+                        color = "#B197FC")) %>%
+  visGroups(groupname =  "Person",
+            shape = "icon",
+            icon = list(code = "f007")) %>%
+  visGroups(groupname =  "CEO",
+            shape = "icon",
+            icon = list(code = "f21b",
+                        color = "#FFD43B")) %>%
+  visEdges(arrows = "to",
+           smooth = list(enabled = TRUE,
+                         type = "curvedCW")) %>%  
+  visLegend(width = 0.15,) %>%
+  visOptions(nodesIdSelection = TRUE,
+             selectedBy = "Company",
+             highlightNearest = list(enabled = T, 
+                                     degree = 2, 
+                                     hover = F))
+```
+
+::: callout-tip
+
+## Observation
+
+The resulting graph is able to show case changes of a network group over time and the fact that it could be shown together with other company shown that there is a very powerful group of business and people that have extensive connection within the market and has been constantly growing especially during the period of 2034 and 2035. Some of these individual are the ones mentioned in part 1 and 2, such as **Zachary Taylor** or **Breanna Price**. However these are not the only people, there are a network of around 20+ people of such and their connection business extended to both Fishing and Logistics company as well
+
+:::
+
+![](1.png)
+
+# VI. Task 4
+
+
+***Extract the nodes and edges***
+
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+mc3_data <- fromJSON("data/mc3.json")
+nodes <- mc3_data$nodes
+edges <- mc3_data$links
+```
+
+
+***Data Processing***
+
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+# Ensure 'id' columns and edge 'source'/'target' columns are character type
+nodes$id <- as.character(nodes$id)
+edges$source <- as.character(edges$source)
+edges$target <- as.character(edges$target)
+
+# Ensure edges are not NULL
+if (is.null(edges)) {
+  edges <- data.frame()
+}
+
+# Convert date columns to Date type
+edges$end_date <- as.Date(edges$end_date)
+
+# Check for NA or empty values in the node IDs or edge source/target
+if (any(is.na(nodes$id) | nodes$id == "")) {
+  stop("NA or empty values found in node IDs.")
+}
+if (any(is.na(edges$source) | edges$source == "" | is.na(edges$target) | edges$target == "")) {
+  stop("NA or empty values found in edge source or target.")
+}
+
+# Remove rows with NA or empty values
+nodes <- nodes %>% filter(!is.na(id) & id != "")
+edges <- edges %>% filter(!is.na(source) & source != "" & !is.na(target) & target != "")
+
+# Ensure unique id values
+nodes$id <- make.unique(nodes$id)
+
+# Replace NA values in id with a unique identifier
+nodes$id[is.na(nodes$id)] <- paste0("NA_", seq_along(nodes$id[is.na(nodes$id)]))
+
+# Create a new label combining company name and revenue
+nodes$label <- paste(nodes$id,",Rev:", nodes$revenue)
+
+# Function to perform BFS
+bfs <- function(edges, start_node) {
+  adj_list <- list()
+  for (i in 1:nrow(edges)) {
+    source <- edges[i, "source"]
+    target <- edges[i, "target"]
+    if (!source %in% names(adj_list)) adj_list[[source]] <- c()
+    if (!target %in% names(adj_list)) adj_list[[target]] <- c()
+    adj_list[[source]] <- c(adj_list[[source]], target)
+    adj_list[[target]] <- c(adj_list[[target]], source)
+  }
+  
+  visited <- setNames(rep(FALSE, length(adj_list)), names(adj_list))
+  queue <- c(start_node)
+  visited[start_node] <- TRUE
+  
+  while (length(queue) > 0) {
+    node <- queue[1]
+    queue <- queue[-1]
+    neighbors <- adj_list[[node]]
+    for (neighbor in neighbors) {
+      if (!visited[neighbor]) {
+        queue <- c(queue, neighbor)
+        visited[neighbor] <- TRUE
+      }
+    }
+  }
+  return(names(visited[visited]))
+}
+
+# Find all nodes connected to "SouthSeafood Express Corp"
+target_company <- "SouthSeafood Express Corp"
+connected_nodes <- bfs(edges, target_company)
+
+# Filter the nodes and edges based on connected nodes
+filtered_nodes <- nodes %>% filter(id %in% connected_nodes)
+filtered_edges <- edges %>% filter(source %in% connected_nodes & target %in% connected_nodes)
+
+# Move 'source' and 'target' columns to the leftmost positions
+filtered_edges <- filtered_edges %>% select(source, target, everything())
+filtered_nodes <- filtered_nodes %>% select(id, everything())
+
+# Key date
+key_date <- as.Date("2035-05-25")
+
+# Separate the edges based on the key date
+before_edges <- filtered_edges %>% filter(is.na(end_date) | end_date <= key_date)
+after_edges <- filtered_edges %>% filter(is.na(end_date) | end_date >= key_date)
+
+```
+
+***Problem Statement 1:***
+Identify the network associated with SouthSeafood Express Corp and visualize how this network and competing businesses change as a result of their illegal fishing behavior.
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+# Function to create a dendrogram plot using ggdendro
+create_dendrogram <- function(nodes, edges, plot_title) {
+  # Create tidygraph object
+  graph <- tbl_graph(nodes = nodes, edges = edges, directed = FALSE)
+  
+  # Calculate shortest path distances
+  dist_matrix <- distances(graph, to = V(graph), mode = "all")
+  
+  # Create a hierarchical clustering object
+  hc <- hclust(as.dist(dist_matrix), method = "complete")
+  
+  # Convert to a dendrogram object
+  dend <- as.dendrogram(hc)
+  
+  # Convert the dendrogram to a format suitable for ggplot
+  dend_data <- dendro_data(dend)
+  
+  # Extract node labels
+  labels <- nodes$label[as.integer(dend_data$labels$label)]
+  
+  # Plot the dendrogram using ggdendro
+  ggplot() +
+    geom_segment(data = segment(dend_data), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_text(data = label(dend_data), aes(x = x, y = y, label = labels), hjust = 0, size = 3) +
+    coord_flip() +
+    scale_y_reverse(expand = c(0.2, 0)) +
+    ggtitle(plot_title) +
+    theme_minimal() +
+    theme(plot.margin = unit(c(1, 1, 1, 1), "cm")) 
+}
+
+# Create and plot the "before" dendrogram
+create_dendrogram(filtered_nodes, before_edges, "Before 2035-05-25")
+
+
+# Create and plot the "after" dendrogram
+create_dendrogram(filtered_nodes, after_edges, "After 2035-05-25")
+
+```
+
+***Analysis***
+Before the Incident (2035-05-25)
+
+SouthSeafood Express Corp was closely connected to:
+
+Namorna Transit Ltd.,
+AguaLeska Transit N.V.,
+V. Miesel Shipping,
+Tainamarine Fishing Co,
+Elise Hauser,
+Naddi Conti,
+Liam Conti,
+Savanteak Creek Solutions NV,
+Oka Seafood Shipping Ges.m.b.h.,
+Fintan Park,
+Rafael Sanchez,
+NyanzaRiver Worldwides A/S,
+KisumaSeafoodBrothers Ltd.,
+Fabio Conti,
+RecHfish Freight Plc.,
+James Bell,
+The News Buoy,
+Samuel Conti.
+
+***After the Incident (2035-05-25)***
+SouthSeafood Express Corp is still present in the network but with some changes in its connections:
+The same immediate connections (Namorna Transit Ltd., AguaLeska Transit N.V.) remain.
+The branch it belongs to appears more consolidated, indicating possibly tighter or more scrutinized relationships.
+Observations
+Direct Network Stability:
+
+The core network around SouthSeafood Express Corp remains relatively stable, with primary connections like Namorna Transit Ltd. and AguaLeska Transit N.V. still intact.
+Branch Consolidation:
+
+Post-incident, the branch including SouthSeafood Express Corp appears to have consolidated. This could indicate closer scrutiny or stronger ties among these entities to mitigate risks or manage fallout from the incident.
+Minor Shifts in Indirect Connections:
+
+Some indirect connections appear to have shifted or been restructured. For example, there are fewer connections extending from nodes like V. Miesel Shipping and Tainamarine Fishing Co, suggesting possible distancing or reduced interaction.
+Competing Businesses' Positioning:
+
+Competing businesses such as ArawakFish Cargo Ges.m.b.h., Sanaa El-Amin, and Macaama Ocean Worldwide LLC maintain their positions, indicating that the incident did not significantly disrupt their hierarchical standing.
+New Alliances and Relationships:
+
+The dendrogram indicates potential new alliances or strengthened relationships post-incident, especially among companies within close hierarchical proximity to SouthSeafood Express Corp.
+Conclusion
+The incident involving SouthSeafood Express Corp did not drastically alter its immediate network, but it did lead to some consolidation and minor shifts in relationships. The stability of its core connections suggests that the network has adapted to the incident, possibly through strengthened alliances or increased scrutiny to manage the impact. Competing businesses have maintained their positions, indicating that while there were some changes, the overall market structure remains stable. Further detailed data analysis would be needed to understand the specific nature of these relationship changes.
+
+
+***Problem Statement 2:***
+ Which companies benefited from SouthSeafood Express Corp legal troubles? 
+
+***Analysis***
+
+To determine which companies benefited from SouthSeafood Express Corp's legal troubles, we should look at the changes in the dendrogram before and after the incident. Companies that appear to have strengthened their positions or gained new connections post-incident are likely to have benefited.
+
+Analysis of Benefiting Companies
+
+1. GvardeyskAmerica Shipping Plc
+This company appears to have a stronger position in the post-incident dendrogram, with several new connections. This suggests it may have capitalized on the market opportunity created by SouthSeafood Express Corp's legal troubles.
+
+2. ArawakFish Cargo Ges.m.b.h.
+Positioned near the top in both dendrograms, ArawakFish Cargo Ges.m.b.h. seems to have retained a strong market position. The stability and potential new indirect connections imply it might have absorbed some of the business fallout.
+
+3. Macaama Ocean Worldwide LLC
+Similar to ArawakFish, this company maintains its position and potentially gains from reduced competition from SouthSeafood Express Corp.
+
+4. Oka Charter Boat Transport OJSC
+Another company that shows a stable and potentially strengthened network post-incident.
+
+5. Naddi Conti and Liam Conti
+These companies, originally in the same branch as SouthSeafood Express Corp, seem to have fewer but stronger connections post-incident, indicating they might have consolidated or absorbed some of the business.
+
+6. Namorna Transit Ltd. and AguaLeska Transit N.V.
+Despite being closely linked with SouthSeafood Express Corp, their continued presence and potential new connections suggest they managed to navigate the troubles effectively, possibly gaining from changes in the network dynamics.
+
+7. StichtingMarine Shipping Company
+Appears to have a stronger presence post-incident, indicating it might have captured some market share or business that SouthSeafood Express Corp lost.
+
+8. Savanteak Creek Solutions NV
+Shows signs of increased importance or new connections, which can be a direct benefit from the incident.
+
+9. NyanzaRiver Worldwides A/S and KisumaSeafoodBrothers Ltd.
+These companies have maintained their positions and might have benefited indirectly through reduced competition or new partnerships.
+
+10. RecHfish Freight Plc.
+This company shows a potential strengthening of its position in the post-incident network.
+Summary
+
+The companies that appear to have benefited the most from SouthSeafood Express Corp's legal troubles include:
+
+GvardeyskAmerica Shipping Plc,
+ArawakFish Cargo Ges.m.b.h.,
+Macaama Ocean Worldwide LLC,
+Oka Charter Boat Transport OJSC,
+Naddi Conti,
+Liam Conti,
+Namorna Transit Ltd.,
+AguaLeska Transit N.V.,
+StichtingMarine Shipping Company,
+Savanteak Creek Solutions NV,
+NyanzaRiver Worldwides A/S,
+KisumaSeafoodBrothers Ltd.,
+RecHfish Freight Plc.
+
+These companies have either gained new connections, strengthened existing ones, or maintained a stable position while others might have struggled, suggesting they capitalized on the market disruptions caused by SouthSeafood Express Corp's legal issues.
+
+***Problem Statement 3:***
+Are there any other suspicious transactions that may be related to illegal fishing?
+
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+#  Convert nodes to a data frame for filtering purposes
+nodes_df <- as.data.frame(nodes)
+
+# Filter the dataset for companies involved in fishing, sea food, and seafood
+fishing_companies <- nodes_df %>%
+  filter(grepl("fish|sea food|seafood", TradeDescription, ignore.case = TRUE))
+
+# Remove rows with missing or non-finite revenue values
+fishing_companies <- fishing_companies %>%
+  filter(!is.na(revenue) & is.finite(revenue))
+
+# Identify top outliers by revenue (95th percentile)
+top_outliers <- fishing_companies %>%
+  filter(revenue > quantile(revenue, 0.95, na.rm = TRUE))
+
+# Extract the IDs of the top outliers
+top_outlier_ids <- top_outliers$id
+
+# Convert edges to a data frame for filtering purposes
+edges_df <- as.data.frame(edges)
+
+# Filter edges to include only those related to top outliers
+related_edges <- edges_df %>%
+  filter(source %in% top_outlier_ids | target %in% top_outlier_ids)
+
+# Create an edge list for igraph
+edge_list <- as.matrix(related_edges[, c("source", "target")])
+
+```
+
+Create graph
+
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show the code"
+
+# Create graph object
+g <- graph_from_edgelist(edge_list, directed = FALSE)
+
+# Add vertex attributes for revenue and country
+V(g)$revenue <- ifelse(V(g)$name %in% top_outliers$id, top_outliers$revenue[match(V(g)$name, top_outliers$id)], NA)
+V(g)$country <- ifelse(V(g)$name %in% top_outliers$id, top_outliers$country[match(V(g)$name, top_outliers$id)], NA)
+
+# Set node sizes and colors
+V(g)$size <- ifelse(V(g)$name %in% top_outliers$id, 10, 5)  # Increase size for top outliers
+V(g)$color <- ifelse(V(g)$name %in% top_outliers$id, "skyblue", "red")  # Different colors for top outliers
+V(g)$shape <- ifelse(V(g)$name %in% top_outliers$id, "square", "circle")  # Different shapes for top outliers
+E(g)$color <- adjustcolor("gray", alpha.f = 0.5)  # Transparent edges
+
+
+
+# Plot the network graph
+plot(g, vertex.size = V(g)$size, vertex.label.cex = ifelse(V(g)$name %in% top_outliers$id, 0.8, 0.6), 
+     vertex.color = V(g)$color, vertex.shape = V(g)$shape,
+     vertex.label = NA, 
+     edge.color = E(g)$color, layout = layout_with_fr, 
+     main = "Network Graph of Top Revenue Outliers")
+
+```
+
+***Analysis***
+Potential Implications for Suspicious Transactions Related to Illegal Fishing:
+Role of Central Nodes:
+
+**Point 1**
+The central nodes (skyblue squares) with many connections could be orchestrating significant activities within the network.
+Their prominent role and high connectivity suggest they might be key players in suspicious transactions related to illegal fishing.
+
+
+**Point 2**
+Dense Clusters:The dense clusters around these central nodes indicate high levels of transactional activity.
+This could be a sign of coordinated efforts to obscure illegal fishing activities through multiple layers of transactions.
+Isolation of Transactions:
+
+**Point 3**
+The presence of smaller, isolated subgroups suggests attempts to hide certain transactions from the main network.
+These isolated groups might be used to carry out suspicious activities without drawing attention.
+
+
+**Point 4**
+Systematic Patterns:The repeated patterns of smaller clusters connected to central nodes indicate a systematic approach to transactions.
+This systematic behavior could be indicative of coordinated efforts to manage and conceal illegal activities related to fishing.
+
+***Conclusion:***
+Based on the analysis of the network graph, there are several visual hints that suggest the possibility of suspicious transactions related to illegal fishing. The prominent role of the central nodes, the dense clusters of transactions, the isolated subgroups, and the systematic patterns all point towards potential coordinated efforts to obscure illegal activities. Further investigation into the nature of these transactions and the entities involved is warranted to confirm these suspicions.
